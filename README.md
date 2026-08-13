@@ -8,9 +8,10 @@ Dictate a list of tasks, have Claude turn it into a task list, and check tasks o
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. In the SQL editor, run the migration in `supabase/migrations/0001_init.sql` — it creates the `tasks` table and row-level security policies scoping each user to their own tasks.
-3. In **Authentication → Providers**, email/password is on by default. For magic links, make sure the "Confirm email" setting matches what you want (magic link works either way).
-4. In **Authentication → URL Configuration**, add `http://localhost:3000/auth/callback` (and your deployed URL's equivalent) to the redirect allow list.
-5. Copy the project URL and anon key from **Project Settings → API**.
+3. In **Authentication → Providers**, email/password is on by default.
+4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
+5. In **Authentication → URL Configuration**, add `http://localhost:3000/auth/callback` (and your deployed URL's equivalent) to the redirect allow list — used for the password sign-up confirmation email.
+6. Copy the project URL and anon key from **Project Settings → API**.
 
 ### 2. Anthropic API key
 
@@ -39,7 +40,7 @@ Open [http://localhost:3000](http://localhost:3000). You'll be redirected to `/l
 
 ## How it works
 
-- **Auth** — Supabase Auth (email/password or magic link). `src/proxy.ts` (Next.js 16's renamed middleware) redirects unauthenticated requests to `/login` and keeps the session cookie fresh.
+- **Auth** — Supabase Auth (email/password, or a one-time 6-digit email code). The code flow deliberately avoids a clickable magic link: Microsoft 365/Outlook's Safe Links protection pre-visits links in incoming email to scan them, which silently burns single-use magic-link tokens before the user ever clicks — a 6-digit code has nothing for the scanner to consume. `src/proxy.ts` (Next.js 16's renamed middleware) redirects unauthenticated requests to `/login` and keeps the session cookie fresh.
 - **Main list view** (`src/app/page.tsx`) — loads existing tasks from Supabase on mount. The dictation box sends its text to `/api/parse-tasks`, a server-side route that calls the Claude API to split it into discrete tasks, which are then inserted into Supabase. Checking off or deleting a task updates Supabase directly.
 - **Dictation** — uses the browser's built-in Web Speech API (no server round-trip). Not supported in every browser (notably: not Firefox) — typing works everywhere as a fallback.
 
