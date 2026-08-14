@@ -7,6 +7,12 @@ import { createClient } from "@/lib/supabase/client";
 type Mode = "password" | "code";
 type CodeStep = "request" | "verify";
 
+const inputClass =
+  "w-full rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500 disabled:opacity-50";
+
+const primaryButtonClass =
+  "w-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-[0_0_25px_rgba(37,99,235,0.35)] transition hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] disabled:opacity-50 disabled:shadow-none";
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("code");
@@ -91,10 +97,10 @@ export default function LoginPage() {
 
   return (
     <main className="flex flex-1 items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-6">
+      <div className="w-full max-w-sm space-y-6 rounded-2xl border border-blue-500/20 bg-slate-900/70 p-6 shadow-xl shadow-blue-950/40 backdrop-blur">
         <div className="space-y-1 text-center">
-          <h1 className="text-2xl font-semibold">Task List</h1>
-          <p className="text-sm text-gray-500">
+          <h1 className="text-2xl font-bold text-white">Voice Task List</h1>
+          <p className="text-sm text-slate-400">
             {mode === "code"
               ? codeStep === "request"
                 ? "Sign in with a one-time code."
@@ -117,7 +123,7 @@ export default function LoginPage() {
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500 disabled:bg-gray-50 disabled:text-gray-500"
+              className={inputClass}
             />
 
             {codeStep === "verify" && (
@@ -129,15 +135,11 @@ export default function LoginPage() {
                 placeholder="Code from your email"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-center text-lg tracking-widest outline-none focus:border-gray-500"
+                className={`${inputClass} text-center text-lg tracking-widest`}
               />
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className={primaryButtonClass}>
               {loading
                 ? "Please wait..."
                 : codeStep === "request"
@@ -153,7 +155,7 @@ export default function LoginPage() {
                   setCode("");
                   setMessage(null);
                 }}
-                className="w-full text-center text-sm text-gray-500 underline"
+                className="w-full text-center text-sm text-slate-400 underline"
               >
                 Use a different email
               </button>
@@ -167,7 +169,7 @@ export default function LoginPage() {
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
+              className={inputClass}
             />
 
             <input
@@ -176,23 +178,19 @@ export default function LoginPage() {
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
+              className={inputClass}
             />
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-md bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className={primaryButtonClass}>
               {loading ? "Please wait..." : isSignUp ? "Sign up" : "Sign in"}
             </button>
           </form>
         )}
 
-        {message && <p className="text-sm text-green-600">{message}</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {message && <p className="text-sm text-green-400">{message}</p>}
+        {error && <p className="text-sm text-red-400">{error}</p>}
 
-        <div className="flex items-center justify-between text-sm text-gray-500">
+        <div className="flex items-center justify-between text-sm text-slate-400">
           <button
             type="button"
             onClick={() => switchMode(mode === "code" ? "password" : "code")}

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Check, ListChecks, Mic, Square, Trash2, Volume2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type Task = {
@@ -12,12 +13,22 @@ type Task = {
 };
 
 function formatTimestamp(iso: string) {
-  return new Date(iso).toLocaleString(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const date = new Date(iso);
+  const day = date.getDate();
+  const month = date.toLocaleString(undefined, { month: "short" });
+  const hours24 = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  const ampm = hours24 >= 12 ? "pm" : "am";
+  const hours = hours24 % 12 || 12;
+  return `${day} ${month} at ${hours}:${minutes} ${ampm}`;
+}
+
+function getInitials(email: string) {
+  const local = email.split("@")[0];
+  const parts = local.split(/[.\-_]+/).filter(Boolean);
+  const initials =
+    parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2);
+  return initials.toUpperCase();
 }
 
 export default function Home() {
@@ -25,6 +36,7 @@ export default function Home() {
   const supabase = createClient();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [dictation, setDictation] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
@@ -36,20 +48,21 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadTasks() {
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("*")
-        .order("created_at", { ascending: true });
+    async function loadData() {
+      const [tasksResult, userResult] = await Promise.all([
+        supabase.from("tasks").select("*").order("created_at", { ascending: true }),
+        supabase.auth.getUser(),
+      ]);
 
       if (!cancelled) {
-        if (error) setError(error.message);
-        else setTasks(data ?? []);
+        if (tasksResult.error) setError(tasksResult.error.message);
+        else setTasks(tasksResult.data ?? []);
+        setUserEmail(userResult.data.user?.email ?? null);
         setLoadingTasks(false);
       }
     }
 
-    loadTasks();
+    loadData();
     return () => {
       cancelled = true;
     };
@@ -216,31 +229,37 @@ export default function Home() {
     return (
       <div
         key={task.id}
-        className="flex items-center gap-3 rounded-md border border-gray-200 p-3"
+        className="flex items-center gap-3 rounded-xl border border-slate-700/60 bg-slate-900/50 p-3 backdrop-blur"
       >
-        <input
-          type="checkbox"
-          checked={task.done}
-          onChange={() => toggleDone(task)}
-          className="h-4 w-4"
-        />
+        <button
+          onClick={() => toggleDone(task)}
+          aria-label={task.done ? "Mark as not done" : "Mark as done"}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition ${
+            task.done
+              ? "border-blue-500 bg-blue-500"
+              : "border-slate-600 hover:border-blue-500"
+          }`}
+        >
+          {task.done && <Check className="h-4 w-4 text-white" />}
+        </button>
         <div className="flex-1">
           <p
             className={`text-sm ${
-              task.done ? "text-gray-400 line-through" : "text-gray-900"
+              task.done ? "text-slate-500 line-through" : "text-slate-100"
             }`}
           >
             {task.text}
           </p>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-slate-500">
             {formatTimestamp(task.created_at)}
           </p>
         </div>
         <button
           onClick={() => deleteTask(task)}
-          className="text-xs text-gray-400 hover:text-red-600"
+          aria-label="Delete task"
+          className="shrink-0 text-slate-500 hover:text-red-400"
         >
-          Delete
+          <Trash2 className="h-4 w-4" />
         </button>
       </div>
     );
@@ -249,74 +268,94 @@ export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 p-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Task List</h1>
+        <h1 className="text-2xl font-bold text-white">Voice Task List</h1>
         <button
           onClick={handleSignOut}
-          className="text-sm text-gray-500 underline"
+          title="Sign out"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white shadow-md"
         >
-          Sign out
+          {userEmail ? getInitials(userEmail) : "?"}
         </button>
       </div>
 
-      <div className="space-y-3 rounded-lg border border-gray-200 p-4">
-        <textarea
-          value={dictation}
-          onChange={(e) => setDictation(e.target.value)}
-          placeholder="Dictate or type a list of tasks..."
-          rows={4}
-          className="w-full resize-none rounded-md border border-gray-300 p-2 text-sm outline-none focus:border-gray-500"
-        />
-        <div className="flex gap-2">
-          <button
-            onClick={toggleDictation}
-            className={`rounded-md px-3 py-2 text-sm font-medium ${
-              isRecording
-                ? "bg-red-600 text-white"
-                : "bg-gray-100 text-gray-900"
-            }`}
-          >
-            {isRecording ? "Stop" : "Dictate"}
-          </button>
-          <button
-            onClick={handleTurnIntoList}
-            disabled={isParsing || !dictation.trim()}
-            className="flex-1 rounded-md bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {isParsing ? "Turning into list..." : "Turn into list"}
-          </button>
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-blue-500/20 bg-slate-900/70 p-4 shadow-lg shadow-blue-950/30 backdrop-blur">
+          <textarea
+            value={dictation}
+            onChange={(e) => setDictation(e.target.value)}
+            placeholder="Dictate or type a list of tasks..."
+            rows={4}
+            className="w-full resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none"
+          />
+          <div className="mt-2 flex items-center gap-2">
+            {isRecording && (
+              <div className="flex h-5 items-end gap-0.5">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <span
+                    key={i}
+                    className="waveform-bar w-1 rounded-full bg-blue-400"
+                    style={{ height: "100%", animationDelay: `${i * 0.12}s` }}
+                  />
+                ))}
+              </div>
+            )}
+            <button
+              onClick={toggleDictation}
+              aria-label={isRecording ? "Stop dictation" : "Start dictation"}
+              className={`ml-auto flex h-10 w-10 items-center justify-center rounded-full transition ${
+                isRecording
+                  ? "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.5)]"
+                  : "bg-slate-800 text-slate-200 hover:bg-slate-700"
+              }`}
+            >
+              {isRecording ? (
+                <Square className="h-4 w-4" />
+              ) : (
+                <Mic className="h-4 w-4" />
+              )}
+            </button>
+          </div>
         </div>
+
+        <button
+          onClick={handleTurnIntoList}
+          disabled={isParsing || !dictation.trim()}
+          className="w-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-3 text-sm font-semibold text-white shadow-[0_0_25px_rgba(37,99,235,0.35)] transition hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] disabled:opacity-50 disabled:shadow-none"
+        >
+          {isParsing ? "Creating list..." : "Create list"}
+        </button>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-400">{error}</p>}
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <button
             onClick={handleReadList}
             disabled={openTasks.length === 0}
-            className="text-sm text-gray-500 underline disabled:opacity-50"
+            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 backdrop-blur disabled:opacity-40"
           >
-            Read list aloud
+            <Volume2 className="h-4 w-4" />
+            Read aloud
           </button>
           {completedTasks.length > 0 && (
             <button
               onClick={() => setShowCompleted((v) => !v)}
-              className="text-sm text-gray-500 underline"
+              className="flex items-center gap-2 rounded-full border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm text-orange-300"
             >
-              {showCompleted
-                ? "Hide completed"
-                : `Show completed (${completedTasks.length})`}
+              <ListChecks className="h-4 w-4" />
+              {showCompleted ? "Hide completed" : `${completedTasks.length} completed`}
             </button>
           )}
         </div>
 
         <div className="space-y-2">
           {loadingTasks ? (
-            <p className="text-sm text-gray-500">Loading tasks...</p>
+            <p className="text-sm text-slate-400">Loading tasks...</p>
           ) : tasks.length === 0 ? (
-            <p className="text-sm text-gray-500">No tasks yet.</p>
+            <p className="text-sm text-slate-400">No tasks yet.</p>
           ) : openTasks.length === 0 ? (
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-slate-400">
               No open tasks — nice work.
             </p>
           ) : (
@@ -326,7 +365,7 @@ export default function Home() {
 
         {showCompleted && completedTasks.length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-medium uppercase text-gray-400">
+            <p className="text-xs font-medium uppercase text-slate-500">
               Completed
             </p>
             {completedTasks.map(renderTask)}
