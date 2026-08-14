@@ -33,7 +33,7 @@ export default function LoginPage() {
       setError(error.message);
     } else {
       setCodeStep("verify");
-      setMessage(`Sent a 6-digit code to ${email}.`);
+      setMessage(`Sent a login code to ${email}.`);
     }
   }
 
@@ -126,7 +126,7 @@ export default function LoginPage() {
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 required
-                placeholder="6-digit code"
+                placeholder="Code from your email"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-center text-lg tracking-widest outline-none focus:border-gray-500"
