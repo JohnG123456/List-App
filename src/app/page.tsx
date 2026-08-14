@@ -31,6 +31,32 @@ function getInitials(email: string) {
   return initials.toUpperCase();
 }
 
+const CREATE_LIST_TRIGGERS = [
+  "create the list",
+  "create my list",
+  "create list",
+  "make the list",
+  "make my list",
+  "make list",
+];
+
+// Looks for a spoken "create list" style command and strips it out. Longer
+// phrases are checked first so e.g. "create my list" doesn't leave a
+// stray "my" behind after a looser match.
+function extractCreateListTrigger(text: string) {
+  const lower = text.toLowerCase();
+  for (const phrase of CREATE_LIST_TRIGGERS) {
+    const index = lower.indexOf(phrase);
+    if (index !== -1) {
+      const cleaned = (
+        text.slice(0, index) + text.slice(index + phrase.length)
+      ).trim();
+      return { triggered: true, cleaned };
+    }
+  }
+  return { triggered: false, cleaned: text };
+}
+
 export default function Home() {
   const router = useRouter();
   const supabase = createClient();
@@ -44,6 +70,7 @@ export default function Home() {
   const [showCompleted, setShowCompleted] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const shouldRecordRef = useRef(false);
+  const dictationRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -89,7 +116,25 @@ export default function Home() {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;
       }
-      setDictation((prev) => (prev ? `${prev} ${transcript}` : transcript));
+
+      const { triggered, cleaned } = extractCreateListTrigger(transcript);
+      const next = dictationRef.current
+        ? cleaned
+          ? `${dictationRef.current} ${cleaned}`
+          : dictationRef.current
+        : cleaned;
+
+      dictationRef.current = next;
+      setDictation(next);
+
+      if (triggered) {
+        // Saying "create list" is treated as an explicit stop-and-submit —
+        // end dictation for real (no auto-restart) and submit right away
+        // rather than waiting for the user to tap the buttons.
+        shouldRecordRef.current = false;
+        recognitionRef.current?.stop();
+        handleTurnIntoList(next);
+      }
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -129,8 +174,9 @@ export default function Home() {
     startRecognition();
   }
 
-  async function handleTurnIntoList() {
-    if (!dictation.trim()) return;
+  async function handleTurnIntoList(textOverride?: string) {
+    const text = (textOverride ?? dictation).trim();
+    if (!text) return;
     setIsParsing(true);
     setError(null);
 
@@ -138,7 +184,7 @@ export default function Home() {
       const res = await fetch("/api/parse-tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: dictation }),
+        body: JSON.stringify({ text }),
       });
 
       const data = await res.json();
@@ -164,6 +210,7 @@ export default function Home() {
 
       setTasks((prev) => [...prev, ...(inserted ?? [])]);
       setDictation("");
+      dictationRef.current = "";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -284,7 +331,10 @@ export default function Home() {
         <div className="rounded-2xl border border-blue-500/20 bg-slate-900/70 p-4 shadow-lg shadow-blue-950/30 backdrop-blur">
           <textarea
             value={dictation}
-            onChange={(e) => setDictation(e.target.value)}
+            onChange={(e) => {
+              dictationRef.current = e.target.value;
+              setDictation(e.target.value);
+            }}
             placeholder="Dictate or type a list of tasks..."
             rows={4}
             className="w-full resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none"
@@ -320,7 +370,7 @@ export default function Home() {
         </div>
 
         <button
-          onClick={handleTurnIntoList}
+          onClick={() => handleTurnIntoList()}
           disabled={isParsing || !dictation.trim()}
           className="w-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-3 text-sm font-semibold text-white shadow-[0_0_25px_rgba(37,99,235,0.35)] transition hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] disabled:opacity-50 disabled:shadow-none"
         >
