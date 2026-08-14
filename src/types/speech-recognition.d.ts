@@ -14,6 +14,11 @@ declare global {
     readonly results: SpeechRecognitionResultList;
   }
 
+  interface SpeechRecognitionErrorEvent extends Event {
+    readonly error: string;
+    readonly message: string;
+  }
+
   interface SpeechRecognition extends EventTarget {
     continuous: boolean;
     interimResults: boolean;
@@ -21,7 +26,7 @@ declare global {
     start(): void;
     stop(): void;
     onresult: ((event: SpeechRecognitionEvent) => void) | null;
-    onerror: (() => void) | null;
+    onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
     onend: (() => void) | null;
   }
 

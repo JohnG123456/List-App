@@ -21,6 +21,7 @@ export default function Home() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const shouldRecordRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,17 +45,14 @@ export default function Home() {
     };
   }, [supabase]);
 
-  function toggleDictation() {
+  function startRecognition() {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
       setError("Speech recognition isn't supported in this browser.");
-      return;
-    }
-
-    if (isRecording) {
-      recognitionRef.current?.stop();
+      shouldRecordRef.current = false;
+      setIsRecording(false);
       return;
     }
 
@@ -71,12 +69,41 @@ export default function Home() {
       setDictation((prev) => (prev ? `${prev} ${transcript}` : transcript));
     };
 
-    recognition.onerror = () => setIsRecording(false);
-    recognition.onend = () => setIsRecording(false);
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      // Permission/hardware failures are unrecoverable — stop for real.
+      // Other errors (e.g. "no-speech") are followed by onend, which
+      // decides whether to restart, so leave those alone here.
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        shouldRecordRef.current = false;
+        setError("Microphone access was denied.");
+      }
+    };
+
+    recognition.onend = () => {
+      if (shouldRecordRef.current) {
+        // Safari/iOS ends recognition sessions after a short pause even
+        // with continuous set, so restart automatically to keep dictation
+        // going until the user explicitly stops it.
+        startRecognition();
+      } else {
+        setIsRecording(false);
+      }
+    };
 
     recognitionRef.current = recognition;
     recognition.start();
     setIsRecording(true);
+  }
+
+  function toggleDictation() {
+    if (isRecording) {
+      shouldRecordRef.current = false;
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    shouldRecordRef.current = true;
+    startRecognition();
   }
 
   async function handleTurnIntoList() {
