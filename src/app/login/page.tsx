@@ -32,6 +32,24 @@ export default function LoginPage() {
     setMessage(null);
 
     const supabase = createClient();
+
+    const { data: allowed, error: allowedError } = await supabase.rpc(
+      "is_email_allowed",
+      { check_email: email }
+    );
+
+    if (allowedError) {
+      setLoading(false);
+      setError(allowedError.message);
+      return;
+    }
+
+    if (!allowed) {
+      setLoading(false);
+      setError("This email hasn't been given access to this app.");
+      return;
+    }
+
     const { error } = await supabase.auth.signInWithOtp({ email });
 
     setLoading(false);
@@ -72,6 +90,26 @@ export default function LoginPage() {
     setMessage(null);
 
     const supabase = createClient();
+
+    if (isSignUp) {
+      const { data: allowed, error: allowedError } = await supabase.rpc(
+        "is_email_allowed",
+        { check_email: email }
+      );
+
+      if (allowedError) {
+        setLoading(false);
+        setError(allowedError.message);
+        return;
+      }
+
+      if (!allowed) {
+        setLoading(false);
+        setError("This email hasn't been given access to this app.");
+        return;
+      }
+    }
+
     const { error } = isSignUp
       ? await supabase.auth.signUp({ email, password })
       : await supabase.auth.signInWithPassword({ email, password });

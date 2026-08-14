@@ -7,7 +7,9 @@ Dictate a list of tasks, have Claude turn it into a task list, and check tasks o
 ### 1. Supabase project
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. In the SQL editor, run the migration in `supabase/migrations/0001_init.sql` — it creates the `tasks` table and row-level security policies scoping each user to their own tasks.
+2. In the SQL editor, run the migrations in `supabase/migrations/` **in order**:
+   - `0001_init.sql` — creates the `tasks` table and row-level security policies scoping each user to their own tasks.
+   - `0002_allowed_emails.sql` — creates the invite-only allow-list (see [Restricting who can sign up](#restricting-who-can-sign-up)) and seeds it with the admin's email.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**, add `http://localhost:3000/auth/callback` (and your deployed URL's equivalent) to the redirect allow list — used for the password sign-up confirmation email.
@@ -42,7 +44,13 @@ Open [http://localhost:3000](http://localhost:3000). You'll be redirected to `/l
 
 - **Auth** — Supabase Auth (email/password, or a one-time email code). The code flow deliberately avoids a clickable magic link: Microsoft 365/Outlook's Safe Links protection pre-visits links in incoming email to scan them, which silently burns single-use magic-link tokens before the user ever clicks — a numeric code has nothing for the scanner to consume. `src/proxy.ts` (Next.js 16's renamed middleware) redirects unauthenticated requests to `/login` and keeps the session cookie fresh.
 - **Main list view** (`src/app/page.tsx`) — loads existing tasks from Supabase on mount. The dictation box sends its text to `/api/parse-tasks`, a server-side route that calls the Claude API to split it into discrete tasks, which are then inserted into Supabase. Checking off or deleting a task updates Supabase directly.
-- **Dictation** — uses the browser's built-in Web Speech API (no server round-trip). Not supported in every browser (notably: not Firefox) — typing works everywhere as a fallback.
+- **Dictation** — uses the browser's built-in Web Speech API (no server round-trip). Not supported in every browser (notably: not Firefox) — typing works everywhere as a fallback. Saying "create list" (or "create the list" / "make the list") while dictating stops the mic and submits automatically, instead of requiring a button tap.
+
+## Restricting who can sign up
+
+Sign-up is invite-only. The `allowed_emails` table (migration `0002`) holds the list of emails permitted to create an account; the login page checks it (via the `is_email_allowed` SQL function) before sending a code or creating a password account. The signed-in admin — hardcoded as `ADMIN_EMAIL` in `src/app/page.tsx`, and separately in the RLS policies in `0002_allowed_emails.sql` — gets a "Manage access" panel on the main page to add or remove emails. If the admin's own email ever changes, update it in **both** places.
+
+This check runs in the app's UI, not as a database-level lock — someone who called Supabase's auth API directly (bypassing the web app entirely) could still sign up with an email that isn't on the list. Fine for sharing a link with people you trust to just use the app normally; if that gap ever matters, the stronger fix is a Supabase Auth Hook that rejects disallowed sign-ups at the database level.
 
 ## Deploying
 

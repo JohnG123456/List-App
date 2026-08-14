@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ListChecks, Mic, Square, Trash2, Volume2 } from "lucide-react";
+import { Check, ListChecks, Mic, Shield, Square, Trash2, Volume2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type Task = {
@@ -11,6 +11,15 @@ type Task = {
   done: boolean;
   created_at: string;
 };
+
+type AllowedEmail = {
+  id: string;
+  email: string;
+};
+
+// Must match the email hardcoded into the RLS policies in
+// supabase/migrations/0002_allowed_emails.sql — update both if it changes.
+const ADMIN_EMAIL = "john@greenborough.com.au";
 
 function formatTimestamp(iso: string) {
   const date = new Date(iso);
@@ -68,6 +77,9 @@ export default function Home() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
+  const [newAllowedEmail, setNewAllowedEmail] = useState("");
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const shouldRecordRef = useRef(false);
   const dictationRef = useRef("");
@@ -81,11 +93,25 @@ export default function Home() {
         supabase.auth.getUser(),
       ]);
 
-      if (!cancelled) {
-        if (tasksResult.error) setError(tasksResult.error.message);
-        else setTasks(tasksResult.data ?? []);
-        setUserEmail(userResult.data.user?.email ?? null);
-        setLoadingTasks(false);
+      if (cancelled) return;
+
+      if (tasksResult.error) setError(tasksResult.error.message);
+      else setTasks(tasksResult.data ?? []);
+
+      const email = userResult.data.user?.email ?? null;
+      setUserEmail(email);
+      setLoadingTasks(false);
+
+      if (email === ADMIN_EMAIL) {
+        const { data, error } = await supabase
+          .from("allowed_emails")
+          .select("id, email")
+          .order("created_at", { ascending: true });
+
+        if (!cancelled) {
+          if (error) setError(error.message);
+          else setAllowedEmails(data ?? []);
+        }
       }
     }
 
@@ -253,6 +279,42 @@ export default function Home() {
     router.refresh();
   }
 
+  async function addAllowedEmail(e: React.FormEvent) {
+    e.preventDefault();
+    const email = newAllowedEmail.trim().toLowerCase();
+    if (!email) return;
+
+    const { data, error } = await supabase
+      .from("allowed_emails")
+      .insert({ email })
+      .select("id, email")
+      .single();
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setAllowedEmails((prev) => [...prev, data]);
+    setNewAllowedEmail("");
+  }
+
+  async function removeAllowedEmail(entry: AllowedEmail) {
+    if (!window.confirm(`Remove access for ${entry.email}?`)) return;
+
+    const { error } = await supabase
+      .from("allowed_emails")
+      .delete()
+      .eq("id", entry.id);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setAllowedEmails((prev) => prev.filter((e) => e.id !== entry.id));
+  }
+
   function handleReadList() {
     if (!("speechSynthesis" in window)) {
       setError("Reading aloud isn't supported in this browser.");
@@ -326,6 +388,57 @@ export default function Home() {
           {userEmail ? getInitials(userEmail) : "?"}
         </button>
       </div>
+
+      {userEmail === ADMIN_EMAIL && (
+        <div className="space-y-3 rounded-2xl border border-slate-700/60 bg-slate-900/50 p-4 backdrop-blur">
+          <button
+            onClick={() => setShowAdminPanel((v) => !v)}
+            className="flex items-center gap-2 text-sm text-slate-300"
+          >
+            <Shield className="h-4 w-4" />
+            {showAdminPanel ? "Hide" : "Manage"} access ({allowedEmails.length})
+          </button>
+
+          {showAdminPanel && (
+            <div className="space-y-2">
+              <form onSubmit={addAllowedEmail} className="flex gap-2">
+                <input
+                  type="email"
+                  required
+                  placeholder="Email to allow"
+                  value={newAllowedEmail}
+                  onChange={(e) => setNewAllowedEmail(e.target.value)}
+                  className="flex-1 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500"
+                />
+                <button
+                  type="submit"
+                  className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
+                >
+                  Add
+                </button>
+              </form>
+
+              <div className="space-y-1">
+                {allowedEmails.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between rounded-lg bg-slate-800/40 px-3 py-2 text-sm text-slate-200"
+                  >
+                    {entry.email}
+                    <button
+                      onClick={() => removeAllowedEmail(entry)}
+                      aria-label={`Remove access for ${entry.email}`}
+                      className="shrink-0 text-slate-500 hover:text-red-400"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-4">
         <div className="rounded-2xl border border-blue-500/20 bg-slate-900/70 p-4 shadow-lg shadow-blue-950/30 backdrop-blur">
