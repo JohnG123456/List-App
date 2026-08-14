@@ -188,6 +188,8 @@ export default function Home() {
   }
 
   async function deleteTask(task: Task) {
+    if (!window.confirm(`Delete "${task.text}"?`)) return;
+
     const { error } = await supabase.from("tasks").delete().eq("id", task.id);
 
     if (error) {
