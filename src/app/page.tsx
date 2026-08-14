@@ -2,7 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ListChecks, Mic, Shield, Square, Trash2, Volume2 } from "lucide-react";
+import {
+  Check,
+  ListChecks,
+  Mail,
+  Mic,
+  Shield,
+  Square,
+  Trash2,
+  Volume2,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type Task = {
@@ -77,6 +86,8 @@ export default function Home() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [isEmailingList, setIsEmailingList] = useState(false);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
   const [newAllowedEmail, setNewAllowedEmail] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
@@ -333,6 +344,23 @@ export default function Home() {
     window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
   }
 
+  async function handleEmailList() {
+    setIsEmailingList(true);
+    setError(null);
+    setInfoMessage(null);
+
+    try {
+      const res = await fetch("/api/email-list", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to send email");
+      setInfoMessage("Sent to your inbox.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsEmailingList(false);
+    }
+  }
+
   const openTasks = tasks.filter((t) => !t.done);
   const completedTasks = tasks.filter((t) => t.done);
 
@@ -492,9 +520,10 @@ export default function Home() {
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
+      {infoMessage && <p className="text-sm text-green-400">{infoMessage}</p>}
 
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleReadList}
             disabled={openTasks.length === 0}
@@ -503,10 +532,18 @@ export default function Home() {
             <Volume2 className="h-4 w-4" />
             Read aloud
           </button>
+          <button
+            onClick={handleEmailList}
+            disabled={isEmailingList || openTasks.length === 0}
+            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 backdrop-blur disabled:opacity-40"
+          >
+            <Mail className="h-4 w-4" />
+            {isEmailingList ? "Sending..." : "Email me"}
+          </button>
           {completedTasks.length > 0 && (
             <button
               onClick={() => setShowCompleted((v) => !v)}
-              className="flex items-center gap-2 rounded-full border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm text-orange-300"
+              className="ml-auto flex items-center gap-2 rounded-full border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm text-orange-300"
             >
               <ListChecks className="h-4 w-4" />
               {showCompleted ? "Hide completed" : `${completedTasks.length} completed`}

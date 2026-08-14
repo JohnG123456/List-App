@@ -19,7 +19,15 @@ Dictate a list of tasks, have Claude turn it into a task list, and check tasks o
 
 Get a key from the [Anthropic Console](https://console.anthropic.com). It's only ever used server-side (in `src/app/api/parse-tasks/route.ts`) — never exposed to the browser.
 
-### 3. Environment variables
+### 3. Gmail app password for "Email me"
+
+The "Email me" button sends the same Gmail account already used for SMTP login codes (see [How it works](#how-it-works)), but it needs its **own** app password — Google only shows an app password once, and the one already pasted into Supabase's SMTP settings can't be retrieved again. Generate a second one:
+
+1. Sign into that Gmail account → [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+2. Name it something like "Voice Task List app" and create it.
+3. Copy the 16-character password (spaces don't matter, with or without them works).
+
+### 4. Environment variables
 
 Copy `.env.example` to `.env.local` and fill in:
 
@@ -27,9 +35,11 @@ Copy `.env.example` to `.env.local` and fill in:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 ANTHROPIC_API_KEY=
+GMAIL_ADDRESS=
+GMAIL_APP_PASSWORD=
 ```
 
-### 4. Run it
+### 5. Run it
 
 ```bash
 npm install
@@ -45,6 +55,7 @@ Open [http://localhost:3000](http://localhost:3000). You'll be redirected to `/l
 - **Auth** — Supabase Auth (email/password, or a one-time email code). The code flow deliberately avoids a clickable magic link: Microsoft 365/Outlook's Safe Links protection pre-visits links in incoming email to scan them, which silently burns single-use magic-link tokens before the user ever clicks — a numeric code has nothing for the scanner to consume. `src/proxy.ts` (Next.js 16's renamed middleware) redirects unauthenticated requests to `/login` and keeps the session cookie fresh.
 - **Main list view** (`src/app/page.tsx`) — loads existing tasks from Supabase on mount. The dictation box sends its text to `/api/parse-tasks`, a server-side route that calls the Claude API to split it into discrete tasks, which are then inserted into Supabase. Checking off or deleting a task updates Supabase directly.
 - **Dictation** — uses the browser's built-in Web Speech API (no server round-trip). Not supported in every browser (notably: not Firefox) — typing works everywhere as a fallback. Saying "create list" (or "create the list" / "make the list") while dictating stops the mic and submits automatically, instead of requiring a button tap.
+- **"Email me"** — `/api/email-list` fetches your open tasks (RLS-scoped, so only your own) and sends them to your own account email via the same Gmail SMTP relay used for login codes, using `nodemailer` server-side.
 
 ## Restricting who can sign up
 
@@ -54,4 +65,4 @@ This check runs in the app's UI, not as a database-level lock — someone who ca
 
 ## Deploying
 
-Deploy to [Vercel](https://vercel.com/new) and set the same three environment variables there. The free tiers of both Supabase and Vercel are enough for personal use — note a free Supabase project pauses after a week of inactivity unless you're on a paid plan.
+Deploy to [Vercel](https://vercel.com/new) and set the same environment variables there. The free tiers of both Supabase and Vercel are enough for personal use — note a free Supabase project pauses after a week of inactivity unless you're on a paid plan.
