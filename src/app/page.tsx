@@ -86,6 +86,7 @@ export default function Home() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [isReading, setIsReading] = useState(false);
   const [isEmailingList, setIsEmailingList] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
@@ -131,6 +132,14 @@ export default function Home() {
       cancelled = true;
     };
   }, [supabase]);
+
+  useEffect(() => {
+    return () => {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   function startRecognition() {
     const SpeechRecognition =
@@ -332,6 +341,12 @@ export default function Home() {
       return;
     }
 
+    if (isReading) {
+      window.speechSynthesis.cancel();
+      setIsReading(false);
+      return;
+    }
+
     const openTasks = tasks.filter((t) => !t.done);
     const text =
       openTasks.length === 0
@@ -340,8 +355,13 @@ export default function Home() {
             openTasks.length === 1 ? "" : "s"
           }: ${openTasks.map((t) => t.text).join(". ")}.`;
 
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => setIsReading(false);
+    utterance.onerror = () => setIsReading(false);
+
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    window.speechSynthesis.speak(utterance);
+    setIsReading(true);
   }
 
   async function handleEmailList() {
@@ -526,11 +546,19 @@ export default function Home() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleReadList}
-            disabled={openTasks.length === 0}
-            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 backdrop-blur disabled:opacity-40"
+            disabled={!isReading && openTasks.length === 0}
+            className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm backdrop-blur disabled:opacity-40 ${
+              isReading
+                ? "border-red-500/40 bg-red-500/10 text-red-300"
+                : "border-slate-700 bg-slate-900/60 text-slate-200"
+            }`}
           >
-            <Volume2 className="h-4 w-4" />
-            Read aloud
+            {isReading ? (
+              <Square className="h-4 w-4" />
+            ) : (
+              <Volume2 className="h-4 w-4" />
+            )}
+            {isReading ? "Stop reading" : "Read aloud"}
           </button>
           <button
             onClick={handleEmailList}
