@@ -11,6 +11,15 @@ type Task = {
   created_at: string;
 };
 
+function formatTimestamp(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function Home() {
   const router = useRouter();
   const supabase = createClient();
@@ -20,6 +29,7 @@ export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCompleted, setShowCompleted] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const shouldRecordRef = useRef(false);
 
@@ -181,6 +191,61 @@ export default function Home() {
     router.refresh();
   }
 
+  function handleReadList() {
+    if (!("speechSynthesis" in window)) {
+      setError("Reading aloud isn't supported in this browser.");
+      return;
+    }
+
+    const openTasks = tasks.filter((t) => !t.done);
+    const text =
+      openTasks.length === 0
+        ? "You have no open tasks."
+        : `You have ${openTasks.length} open task${
+            openTasks.length === 1 ? "" : "s"
+          }: ${openTasks.map((t) => t.text).join(". ")}.`;
+
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+  }
+
+  const openTasks = tasks.filter((t) => !t.done);
+  const completedTasks = tasks.filter((t) => t.done);
+
+  function renderTask(task: Task) {
+    return (
+      <div
+        key={task.id}
+        className="flex items-center gap-3 rounded-md border border-gray-200 p-3"
+      >
+        <input
+          type="checkbox"
+          checked={task.done}
+          onChange={() => toggleDone(task)}
+          className="h-4 w-4"
+        />
+        <div className="flex-1">
+          <p
+            className={`text-sm ${
+              task.done ? "text-gray-400 line-through" : "text-gray-900"
+            }`}
+          >
+            {task.text}
+          </p>
+          <p className="text-xs text-gray-400">
+            {formatTimestamp(task.created_at)}
+          </p>
+        </div>
+        <button
+          onClick={() => deleteTask(task)}
+          className="text-xs text-gray-400 hover:text-red-600"
+        >
+          Delete
+        </button>
+      </div>
+    );
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 p-6">
       <div className="flex items-center justify-between">
@@ -224,38 +289,48 @@ export default function Home() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="space-y-2">
-        {loadingTasks ? (
-          <p className="text-sm text-gray-500">Loading tasks...</p>
-        ) : tasks.length === 0 ? (
-          <p className="text-sm text-gray-500">No tasks yet.</p>
-        ) : (
-          tasks.map((task) => (
-            <div
-              key={task.id}
-              className="flex items-center gap-3 rounded-md border border-gray-200 p-3"
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <button
+            onClick={handleReadList}
+            disabled={openTasks.length === 0}
+            className="text-sm text-gray-500 underline disabled:opacity-50"
+          >
+            Read list aloud
+          </button>
+          {completedTasks.length > 0 && (
+            <button
+              onClick={() => setShowCompleted((v) => !v)}
+              className="text-sm text-gray-500 underline"
             >
-              <input
-                type="checkbox"
-                checked={task.done}
-                onChange={() => toggleDone(task)}
-                className="h-4 w-4"
-              />
-              <span
-                className={`flex-1 text-sm ${
-                  task.done ? "text-gray-400 line-through" : "text-gray-900"
-                }`}
-              >
-                {task.text}
-              </span>
-              <button
-                onClick={() => deleteTask(task)}
-                className="text-xs text-gray-400 hover:text-red-600"
-              >
-                Delete
-              </button>
-            </div>
-          ))
+              {showCompleted
+                ? "Hide completed"
+                : `Show completed (${completedTasks.length})`}
+            </button>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          {loadingTasks ? (
+            <p className="text-sm text-gray-500">Loading tasks...</p>
+          ) : tasks.length === 0 ? (
+            <p className="text-sm text-gray-500">No tasks yet.</p>
+          ) : openTasks.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              No open tasks — nice work.
+            </p>
+          ) : (
+            openTasks.map(renderTask)
+          )}
+        </div>
+
+        {showCompleted && completedTasks.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase text-gray-400">
+              Completed
+            </p>
+            {completedTasks.map(renderTask)}
+          </div>
         )}
       </div>
     </main>
