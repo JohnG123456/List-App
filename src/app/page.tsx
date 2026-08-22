@@ -7,10 +7,12 @@ import {
   ListChecks,
   Mail,
   Mic,
+  Pencil,
   Shield,
   Square,
   Trash2,
   Volume2,
+  X,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -92,6 +94,8 @@ export default function Home() {
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
   const [newAllowedEmail, setNewAllowedEmail] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const shouldRecordRef = useRef(false);
   const dictationRef = useRef("");
@@ -293,6 +297,37 @@ export default function Home() {
     setTasks((prev) => prev.filter((t) => t.id !== task.id));
   }
 
+  function startEditingTask(task: Task) {
+    setEditingTaskId(task.id);
+    setEditingText(task.text);
+  }
+
+  function cancelEditingTask() {
+    setEditingTaskId(null);
+    setEditingText("");
+  }
+
+  async function saveEditingTask(task: Task) {
+    const text = editingText.trim();
+    if (!text || text === task.text) {
+      cancelEditingTask();
+      return;
+    }
+
+    const { error } = await supabase
+      .from("tasks")
+      .update({ text })
+      .eq("id", task.id);
+
+    if (error) {
+      setError(error.message);
+      return;
+    }
+
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, text } : t)));
+    cancelEditingTask();
+  }
+
   async function handleSignOut() {
     await supabase.auth.signOut();
     router.push("/login");
@@ -385,6 +420,8 @@ export default function Home() {
   const completedTasks = tasks.filter((t) => t.done);
 
   function renderTask(task: Task) {
+    const isEditing = editingTaskId === task.id;
+
     return (
       <div
         key={task.id}
@@ -401,25 +438,70 @@ export default function Home() {
         >
           {task.done && <Check className="h-4 w-4 text-white" />}
         </button>
-        <div className="flex-1">
-          <p
-            className={`text-sm ${
-              task.done ? "text-slate-500 line-through" : "text-slate-100"
-            }`}
+
+        {isEditing ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveEditingTask(task);
+            }}
+            className="flex flex-1 items-center gap-2"
           >
-            {task.text}
-          </p>
-          <p className="text-xs text-slate-500">
-            {formatTimestamp(task.created_at)}
-          </p>
-        </div>
-        <button
-          onClick={() => deleteTask(task)}
-          aria-label="Delete task"
-          className="shrink-0 text-slate-500 hover:text-red-400"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+            <input
+              autoFocus
+              value={editingText}
+              onChange={(e) => setEditingText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") cancelEditingTask();
+              }}
+              className="flex-1 rounded-lg border border-blue-500/50 bg-slate-800/60 px-2 py-1 text-sm text-slate-100 outline-none focus:border-blue-500"
+            />
+            <button
+              type="submit"
+              aria-label="Save"
+              className="shrink-0 text-blue-400 hover:text-blue-300"
+            >
+              <Check className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={cancelEditingTask}
+              aria-label="Cancel edit"
+              className="shrink-0 text-slate-500 hover:text-red-400"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </form>
+        ) : (
+          <>
+            <div className="flex-1">
+              <p
+                className={`text-sm ${
+                  task.done ? "text-slate-500 line-through" : "text-slate-100"
+                }`}
+              >
+                {task.text}
+              </p>
+              <p className="text-xs text-slate-500">
+                {formatTimestamp(task.created_at)}
+              </p>
+            </div>
+            <button
+              onClick={() => startEditingTask(task)}
+              aria-label="Edit task"
+              className="shrink-0 text-slate-500 hover:text-blue-400"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => deleteTask(task)}
+              aria-label="Delete task"
+              className="shrink-0 text-slate-500 hover:text-red-400"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </>
+        )}
       </div>
     );
   }
