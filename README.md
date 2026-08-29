@@ -66,3 +66,5 @@ This check runs in the app's UI, not as a database-level lock — someone who ca
 ## Deploying
 
 Deploy to [Vercel](https://vercel.com/new) and set the same environment variables there. The free tiers of both Supabase and Vercel are enough for personal use — note a free Supabase project pauses after a week of inactivity unless you're on a paid plan.
+
+Vercel's production branch is `main` — every push to it publishes a Production deployment; pushes to any other branch get a preview URL instead.
