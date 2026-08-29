@@ -32,6 +32,10 @@ type AllowedEmail = {
 // supabase/migrations/0002_allowed_emails.sql — update both if it changes.
 const ADMIN_EMAIL = "john@greenborough.com.au";
 
+// How long a task stays in the open list, crossed out, after being ticked off.
+// Long enough to see it happen before the row moves to the completed section.
+const COMPLETED_HOLD_MS = 1000;
+
 function formatTimestamp(iso: string) {
   const date = new Date(iso);
   const day = date.getDate();
@@ -96,9 +100,18 @@ export default function Home() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [settlingTaskIds, setSettlingTaskIds] = useState<Set<string>>(new Set());
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const shouldRecordRef = useRef(false);
   const dictationRef = useRef("");
+  const settleTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const timers = settleTimers.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -268,20 +281,58 @@ export default function Home() {
     }
   }
 
+  // Keeps a just-ticked task in the open list, crossed out, so it doesn't
+  // vanish out from under the finger that tapped it.
+  function holdSettling(id: string) {
+    clearTimeout(settleTimers.current.get(id));
+    setSettlingTaskIds((prev) => new Set(prev).add(id));
+    settleTimers.current.set(
+      id,
+      setTimeout(() => {
+        settleTimers.current.delete(id);
+        setSettlingTaskIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, COMPLETED_HOLD_MS)
+    );
+  }
+
+  function releaseSettling(id: string) {
+    clearTimeout(settleTimers.current.get(id));
+    settleTimers.current.delete(id);
+    setSettlingTaskIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+
   async function toggleDone(task: Task) {
+    const done = !task.done;
+
+    // Flip locally first so the tick responds on the tap. The Supabase round
+    // trip runs behind it and only surfaces if it fails.
+    setTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, done } : t))
+    );
+    if (done) holdSettling(task.id);
+    else releaseSettling(task.id);
+
     const { error } = await supabase
       .from("tasks")
-      .update({ done: !task.done })
+      .update({ done })
       .eq("id", task.id);
 
     if (error) {
       setError(error.message);
-      return;
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, done: !done } : t))
+      );
+      releaseSettling(task.id);
     }
-
-    setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t))
-    );
   }
 
   async function deleteTask(task: Task) {
@@ -419,13 +470,25 @@ export default function Home() {
   const openTasks = tasks.filter((t) => !t.done);
   const completedTasks = tasks.filter((t) => t.done);
 
+  // What the two sections actually render: a task that was just ticked off
+  // lingers in the open list until its hold expires.
+  const visibleOpenTasks = tasks.filter(
+    (t) => !t.done || settlingTaskIds.has(t.id)
+  );
+  const visibleCompletedTasks = completedTasks.filter(
+    (t) => !settlingTaskIds.has(t.id)
+  );
+
   function renderTask(task: Task) {
     const isEditing = editingTaskId === task.id;
+    const isSettling = settlingTaskIds.has(task.id);
 
     return (
       <div
         key={task.id}
-        className="flex items-center gap-3 rounded-xl border border-slate-700/60 bg-slate-900/50 p-3 backdrop-blur"
+        className={`flex items-center gap-2.5 rounded-xl border border-slate-700/60 bg-slate-900/50 px-3 py-2 backdrop-blur transition-opacity duration-300 ${
+          isSettling ? "opacity-60" : "opacity-100"
+        }`}
       >
         <button
           onClick={() => toggleDone(task)}
@@ -476,13 +539,13 @@ export default function Home() {
           <>
             <div className="flex-1">
               <p
-                className={`text-sm ${
+                className={`text-sm leading-snug ${
                   task.done ? "text-slate-500 line-through" : "text-slate-100"
                 }`}
               >
                 {task.text}
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs leading-snug text-slate-500">
                 {formatTimestamp(task.created_at)}
               </p>
             </div>
@@ -650,37 +713,39 @@ export default function Home() {
             <Mail className="h-4 w-4" />
             {isEmailingList ? "Sending..." : "Email me"}
           </button>
-          {completedTasks.length > 0 && (
+          {visibleCompletedTasks.length > 0 && (
             <button
               onClick={() => setShowCompleted((v) => !v)}
               className="ml-auto flex items-center gap-2 rounded-full border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm text-orange-300"
             >
               <ListChecks className="h-4 w-4" />
-              {showCompleted ? "Hide completed" : `${completedTasks.length} completed`}
+              {showCompleted
+                ? "Hide completed"
+                : `${visibleCompletedTasks.length} completed`}
             </button>
           )}
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {loadingTasks ? (
             <p className="text-sm text-slate-400">Loading tasks...</p>
           ) : tasks.length === 0 ? (
             <p className="text-sm text-slate-400">No tasks yet.</p>
-          ) : openTasks.length === 0 ? (
+          ) : visibleOpenTasks.length === 0 ? (
             <p className="text-sm text-slate-400">
               No open tasks — nice work.
             </p>
           ) : (
-            openTasks.map(renderTask)
+            visibleOpenTasks.map(renderTask)
           )}
         </div>
 
-        {showCompleted && completedTasks.length > 0 && (
-          <div className="space-y-2">
+        {showCompleted && visibleCompletedTasks.length > 0 && (
+          <div className="space-y-1.5">
             <p className="text-xs font-medium uppercase text-slate-500">
               Completed
             </p>
-            {completedTasks.map(renderTask)}
+            {visibleCompletedTasks.map(renderTask)}
           </div>
         )}
       </div>
