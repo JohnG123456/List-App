@@ -6,7 +6,9 @@ import {
   ListChecks,
   Mail,
   Mic,
+  Search,
   Shield,
+  Sparkles,
   Square,
   Trash2,
   Volume2,
@@ -22,12 +24,14 @@ import type {
   NewItem,
 } from "@/lib/types";
 import {
+  bumpEpisode,
   groupItems,
   groupNames,
   initialsFor,
   initialsFromEmail,
   isSnoozed,
   listsInGroup,
+  watchVerdict,
 } from "@/lib/display";
 import PillRail from "@/components/PillRail";
 import ItemRow from "@/components/ItemRow";
@@ -120,6 +124,13 @@ export default function Home() {
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
   const [isEmailing, setIsEmailing] = useState(false);
+
+  const [watchQuery, setWatchQuery] = useState("");
+  const [picks, setPicks] = useState<
+    { item_id: string; text: string; service: string | null; reason: string }[] | null
+  >(null);
+  const [isPicking, setIsPicking] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
 
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
   const [newAllowedEmail, setNewAllowedEmail] = useState("");
@@ -272,6 +283,14 @@ export default function Home() {
     [lists, activeGroup]
   );
   const moveTargets = useMemo(() => lists.filter((l) => !l.is_archive), [lists]);
+  const isWatchGroup = useMemo(
+    () => visibleLists.some((l) => l.kind === "watch"),
+    [visibleLists]
+  );
+  const verdict = useMemo(
+    () => (isWatchGroup ? watchVerdict(watchQuery, items, lists) : null),
+    [isWatchGroup, watchQuery, items, lists]
+  );
 
   const memberEmails = useMemo(
     () => (userId && userEmail ? { [userId]: userEmail } : {}),
@@ -285,6 +304,14 @@ export default function Home() {
     }
     return names;
   }, [lists, freshListIds]);
+
+  /** Switching pills resets the state that only makes sense on one screen. */
+  function selectGroup(group: string) {
+    setActiveGroup(group);
+    setWatchQuery("");
+    setPicks(null);
+    setShowArchive(false);
+  }
 
   const listById = useCallback(
     (id: string) => lists.find((l) => l.id === id) ?? null,
@@ -597,10 +624,18 @@ export default function Home() {
 
   async function toggleDone(item: Item) {
     const done = !item.done;
+    const list = listById(item.list_id);
+
+    // A list can say where a ticked item goes: finishing a show files it under
+    // Watched. Un-ticking walks it back to whichever list sent it there.
+    const sentBy = lists.find((l) => l.done_to === item.list_id);
+    const destination = done ? (list?.done_to ?? null) : (sentBy?.id ?? null);
+
     const patch = {
       done,
       done_at: done ? new Date().toISOString() : null,
       done_by: done ? userId : null,
+      ...(destination ? { list_id: destination } : {}),
     };
 
     // Flip locally first so the tick responds on the tap. The round trip runs
@@ -618,6 +653,14 @@ export default function Home() {
       setError(updateError.message);
       setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
       releaseSettling(item.id);
+      return;
+    }
+
+    // A ticked show leaves the screen entirely when it files itself under
+    // Watched, so say where it went rather than letting it just vanish.
+    if (destination) {
+      const target = listById(destination);
+      if (target) setInfoMessage(`Filed under ${target.name}.`);
     }
   }
 
@@ -655,6 +698,85 @@ export default function Home() {
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, list_id: listId } : i)));
     const target = listById(listId);
     if (target) setInfoMessage(`Moved to ${target.name}.`);
+  }
+
+  async function promoteItem(item: Item) {
+    const list = listById(item.list_id);
+    if (!list?.promote_to) return;
+
+    const patch = {
+      list_id: list.promote_to,
+      // Something being started needs a place to record where you are up to.
+      progress: item.progress ?? "S1 E1",
+    };
+
+    const { error: updateError } = await supabase
+      .from("items")
+      .update(patch)
+      .eq("id", item.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...patch } : i)));
+    const target = listById(list.promote_to);
+    if (target) setInfoMessage(`Moved to ${target.name}.`);
+  }
+
+  async function bumpItemEpisode(item: Item) {
+    const progress = bumpEpisode(item.progress);
+    if (progress === item.progress) return;
+
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, progress } : i)));
+
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ progress })
+      .eq("id", item.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
+    }
+  }
+
+  async function setItemService(item: Item, service: string) {
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, service } : i)));
+
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ service })
+      .eq("id", item.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
+    }
+  }
+
+  async function pickSomething() {
+    setIsPicking(true);
+    setError(null);
+    setPicks(null);
+
+    try {
+      const res = await fetch("/api/pick", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          listIds: visibleLists.filter((l) => !l.is_archive).map((l) => l.id),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not pick anything");
+      setPicks(data.picks);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsPicking(false);
+    }
   }
 
   // ----------------------------------------------------------- read and email
@@ -748,13 +870,33 @@ export default function Home() {
 
   function renderList(list: List, withHeading: boolean) {
     const mine = items.filter((i) => i.list_id === list.id);
+
+    if (list.is_archive && !showArchive) {
+      return (
+        <div key={list.id} className="space-y-1.5">
+          <div className="flex items-baseline gap-2 pt-2">
+            <h2 className="text-base font-semibold text-slate-100">{list.name}</h2>
+            <span className="text-xs text-slate-500">{mine.length} titles</span>
+          </div>
+          <button
+            onClick={() => setShowArchive(true)}
+            className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300"
+          >
+            Show everything we have finished
+          </button>
+        </div>
+      );
+    }
     const open = mine.filter(
       (i) => (!i.done || settlingIds.has(i.id)) && !isSnoozed(i)
     );
     const doneItems = mine.filter((i) => i.done && !settlingIds.has(i.id));
     const snoozed = mine.filter((i) => !i.done && isSnoozed(i));
     const wantDone = showDone[list.id] ?? list.show_done;
-    const pool = list.is_archive ? mine : open;
+    const query = watchQuery.trim().toLowerCase();
+    const matching = (rows: Item[]) =>
+      query ? rows.filter((i) => i.text.toLowerCase().includes(query)) : rows;
+    const pool = matching(list.is_archive ? mine : open);
 
     return (
       <div key={list.id} className="space-y-1.5">
@@ -789,10 +931,14 @@ export default function Home() {
                   isFresh={freshIds.has(item.id)}
                   addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                   doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                  services={household?.services ?? []}
                   onToggleDone={toggleDone}
                   onEdit={editItem}
                   onDelete={deleteItem}
                   onMove={moveItem}
+                  onPromote={promoteItem}
+                  onBumpEpisode={bumpItemEpisode}
+                  onSetService={setItemService}
                 />
               ))}
             </div>
@@ -827,10 +973,14 @@ export default function Home() {
                     isFresh={false}
                     addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                     doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                    services={household?.services ?? []}
                     onToggleDone={toggleDone}
                     onEdit={editItem}
                     onDelete={deleteItem}
                     onMove={moveItem}
+                    onPromote={promoteItem}
+                    onBumpEpisode={bumpItemEpisode}
+                    onSetService={setItemService}
                   />
                 ))}
               </div>
@@ -912,7 +1062,7 @@ export default function Home() {
           items={items}
           activeGroup={activeGroup}
           freshGroups={freshGroupNames}
-          onSelect={setActiveGroup}
+          onSelect={selectGroup}
         />
       )}
 
@@ -972,7 +1122,7 @@ export default function Home() {
           {receipt.jumps.map((jump) => (
             <button
               key={jump.label}
-              onClick={() => setActiveGroup(jump.group)}
+              onClick={() => selectGroup(jump.group)}
               className="rounded-full border border-emerald-500/45 px-2.5 py-0.5 text-xs text-emerald-300 hover:bg-emerald-500/15"
             >
               {jump.label}
@@ -1018,6 +1168,69 @@ export default function Home() {
             {isEmailing ? "Sending..." : "Email me"}
           </button>
         </div>
+
+        {isWatchGroup && (
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <input
+                value={watchQuery}
+                onChange={(e) => setWatchQuery(e.target.value)}
+                placeholder="Have we watched this?"
+                aria-label="Search everything you have watched"
+                className="w-full rounded-xl border border-slate-700 bg-slate-900/60 py-2 pl-9 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500"
+              />
+            </div>
+
+            {verdict && (
+              <p
+                className={`rounded-xl border px-3 py-2 text-sm ${
+                  verdict.found
+                    ? "border-emerald-500/40 bg-emerald-900/25 text-emerald-100"
+                    : "border-slate-700 bg-slate-900/60 text-slate-300"
+                }`}
+              >
+                {verdict.text}
+              </p>
+            )}
+
+            <button
+              onClick={() => void pickSomething()}
+              disabled={isPicking}
+              className="flex items-center gap-2 rounded-full border border-blue-500/50 bg-blue-500/15 px-4 py-2 text-sm text-blue-100 disabled:opacity-40"
+            >
+              <Sparkles className="h-4 w-4" />
+              {isPicking ? "Having a think..." : "Pick something"}
+            </button>
+
+            {picks?.map((pick) => (
+              <div
+                key={pick.item_id}
+                className="rounded-xl border border-blue-500/35 bg-blue-950/30 px-3 py-2"
+              >
+                <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-100">
+                  {pick.text}
+                  {pick.service && (
+                    <span className="rounded border border-slate-600 bg-slate-500/10 px-1.5 text-[10px] font-normal text-slate-300">
+                      {pick.service}
+                    </span>
+                  )}
+                </p>
+                <p className="mt-1 text-sm text-slate-300">{pick.reason}</p>
+                <button
+                  onClick={() => {
+                    const item = items.find((i) => i.id === pick.item_id);
+                    if (item) void promoteItem(item);
+                    setPicks(null);
+                  }}
+                  className="mt-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
+                >
+                  Start watching
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {loading ? (
           <p className="text-sm text-slate-400">Loading...</p>

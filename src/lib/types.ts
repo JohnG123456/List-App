@@ -15,6 +15,11 @@ export type List = {
   show_done: boolean;
   is_archive: boolean;
   kind: ListKind;
+  /** Where a promote button sends an item, and what that button says. */
+  promote_to: string | null;
+  promote_label: string | null;
+  /** Where a ticked item goes, e.g. Watching now -> Watched. */
+  done_to: string | null;
 };
 
 export type Item = {

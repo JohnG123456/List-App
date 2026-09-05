@@ -13,6 +13,7 @@ Supabase so it's the same on every device.
    - `0001_init.sql` — creates the original `tasks` table and its row-level security policies.
    - `0002_allowed_emails.sql` — creates the invite-only allow-list (see [Restricting who can sign up](#restricting-who-can-sign-up)) and seeds it with the first user's email.
    - `0003_households_and_lists.sql` — households, lists, and the move from one flat task list to many. **Take a database export before running this one**: it renames `tasks` to `items`, rewrites every security policy, and backfills existing rows. A free Supabase project has no point-in-time recovery to fall back on.
+   - `0004_list_transitions.sql` — lets a list say where a promoted or ticked item goes, which is how "Start watching" and filing a finished show under Watched work without the app knowing anything about television.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**, add `http://localhost:3000/auth/callback` (and your deployed URL's equivalent) to the redirect allow list — used for the password sign-up confirmation email.
@@ -112,3 +113,27 @@ household id. A settings screen replaces all of this later.
 
 To make a list private to one person, set `private_to` to their user id; to share
 it with the whole household, set it back to null.
+
+## The TV lists
+
+Watching now, Want to watch and Watched share a `group_name`, so they appear as
+three sections under one TV pill. Each is grouped by streaming service, with
+anything whose service isn't known collected at the bottom behind a **Where?**
+button that sets it from the services your household has configured.
+
+Moving between them is configuration, not code. `promote_to` on Want to watch
+points at Watching now, which is what the play button follows; `done_to` on
+Watching now points at Watched, which is where a ticked show files itself.
+Un-ticking walks it back. Any other pair of lists gets the same behaviour by
+filling in those two columns.
+
+**Have we watched this** searches all three sections in the browser, with no
+round trip, and answers with the service and whose profile it was on — the thing
+the streaming apps can't tell you when you each have your own profile. It only
+knows what's in the app, so anything watched before this existed comes back as
+no match.
+
+**Pick something** (`/api/pick`) chooses from titles you have already saved and
+never invents one. Recommending something new would mean knowing what is on Stan
+this month, which changes constantly; a confident suggestion for something that
+left the service six months ago is worse than no suggestion at all.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, MoveRight, Pencil, Trash2, X } from "lucide-react";
+import { Check, MoveRight, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import type { Item, List } from "@/lib/types";
 import { formatTimestamp } from "@/lib/display";
 
@@ -10,6 +10,8 @@ type Props = {
   list: List;
   /** Every list the item could be moved to. */
   moveTargets: List[];
+  /** The streaming services this household actually pays for. */
+  services: string[];
   isSettling: boolean;
   isFresh: boolean;
   addedByInitials: string | null;
@@ -18,6 +20,9 @@ type Props = {
   onEdit: (item: Item, text: string) => void;
   onDelete: (item: Item) => void;
   onMove: (item: Item, listId: string) => void;
+  onPromote: (item: Item) => void;
+  onBumpEpisode: (item: Item) => void;
+  onSetService: (item: Item, service: string) => void;
 };
 
 /**
@@ -37,10 +42,15 @@ export default function ItemRow({
   onEdit,
   onDelete,
   onMove,
+  onPromote,
+  onBumpEpisode,
+  onSetService,
+  services,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
   const [showMove, setShowMove] = useState(false);
+  const [showServices, setShowServices] = useState(false);
 
   const isShared = list.private_to === null;
   const isWatch = list.kind === "watch";
@@ -132,9 +142,13 @@ export default function ItemRow({
                 </span>
               )}
               {isWatch && !item.service && (
-                <span className="rounded border border-dashed border-orange-500/50 bg-orange-500/10 px-1.5 text-[10px] text-orange-300">
-                  service not set
-                </span>
+                <button
+                  onClick={() => setShowServices((v) => !v)}
+                  title="Set the streaming service"
+                  className="rounded border border-dashed border-orange-500/50 bg-orange-500/10 px-1.5 text-[10px] text-orange-300 hover:border-orange-400"
+                >
+                  Where?
+                </button>
               )}
               {item.progress && <span className="text-blue-300">{item.progress}</span>}
               {item.profile && <span>{item.profile}&rsquo;s profile</span>}
@@ -159,6 +173,26 @@ export default function ItemRow({
             </div>
           </div>
 
+          {list.promote_to && !item.done && (
+            <button
+              onClick={() => onPromote(item)}
+              aria-label={list.promote_label ?? "Move on"}
+              title={list.promote_label ?? "Move on"}
+              className="shrink-0 text-slate-500 hover:text-emerald-400"
+            >
+              <Play className="h-4 w-4" />
+            </button>
+          )}
+          {isWatch && !list.is_archive && !list.promote_to && !item.done && (
+            <button
+              onClick={() => onBumpEpisode(item)}
+              aria-label="Next episode"
+              title="Next episode"
+              className="shrink-0 text-slate-500 hover:text-blue-400"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          )}
           <button
             onClick={() => setShowMove((v) => !v)}
             aria-label="Move to another list"
@@ -182,6 +216,26 @@ export default function ItemRow({
             <Trash2 className="h-4 w-4" />
           </button>
         </>
+      )}
+
+      {showServices && (
+        <div className="absolute right-2 top-full z-20 mt-1 w-48 rounded-xl border border-slate-600 bg-slate-900 p-1.5 shadow-xl">
+          <p className="px-2 pb-1 text-[10px] uppercase tracking-wider text-slate-500">
+            Watch it on
+          </p>
+          {services.map((service) => (
+            <button
+              key={service}
+              onClick={() => {
+                onSetService(item, service);
+                setShowServices(false);
+              }}
+              className="block w-full rounded-lg px-2 py-1.5 text-left text-sm text-slate-200 hover:bg-blue-500/20 hover:text-blue-100"
+            >
+              {service}
+            </button>
+          ))}
+        </div>
       )}
 
       {showMove && (
