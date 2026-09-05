@@ -3,15 +3,11 @@
 import { useState } from "react";
 import { Check, MoveRight, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import type { Item, List } from "@/lib/types";
-import { formatTimestamp } from "@/lib/display";
+import { formatTimestamp, possessive } from "@/lib/display";
 
 type Props = {
   item: Item;
   list: List;
-  /** Every list the item could be moved to. */
-  moveTargets: List[];
-  /** The streaming services this household actually pays for. */
-  services: string[];
   isSettling: boolean;
   isFresh: boolean;
   addedByInitials: string | null;
@@ -19,10 +15,10 @@ type Props = {
   onToggleDone: (item: Item) => void;
   onEdit: (item: Item, text: string) => void;
   onDelete: (item: Item) => void;
-  onMove: (item: Item, listId: string) => void;
+  onRequestMove: (item: Item) => void;
+  onRequestService: (item: Item) => void;
   onPromote: (item: Item) => void;
   onBumpEpisode: (item: Item) => void;
-  onSetService: (item: Item, service: string) => void;
 };
 
 /**
@@ -33,7 +29,6 @@ type Props = {
 export default function ItemRow({
   item,
   list,
-  moveTargets,
   isSettling,
   isFresh,
   addedByInitials,
@@ -41,16 +36,13 @@ export default function ItemRow({
   onToggleDone,
   onEdit,
   onDelete,
-  onMove,
+  onRequestMove,
+  onRequestService,
   onPromote,
   onBumpEpisode,
-  onSetService,
-  services,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
-  const [showMove, setShowMove] = useState(false);
-  const [showServices, setShowServices] = useState(false);
 
   const isShared = list.private_to === null;
   const isWatch = list.kind === "watch";
@@ -143,7 +135,7 @@ export default function ItemRow({
               )}
               {isWatch && !item.service && (
                 <button
-                  onClick={() => setShowServices((v) => !v)}
+                  onClick={() => onRequestService(item)}
                   title="Set the streaming service"
                   className="rounded border border-dashed border-orange-500/50 bg-orange-500/10 px-1.5 text-[10px] text-orange-300 hover:border-orange-400"
                 >
@@ -151,7 +143,7 @@ export default function ItemRow({
                 </button>
               )}
               {item.progress && <span className="text-blue-300">{item.progress}</span>}
-              {item.profile && <span>{item.profile}&rsquo;s profile</span>}
+              {item.profile && <span>{possessive(item.profile)} profile</span>}
               {item.suggested_by && <span>from {item.suggested_by}</span>}
               {!isWatch && <span>{formatTimestamp(item.created_at)}</span>}
               {isShared && addedByInitials && (
@@ -194,7 +186,7 @@ export default function ItemRow({
             </button>
           )}
           <button
-            onClick={() => setShowMove((v) => !v)}
+            onClick={() => onRequestMove(item)}
             aria-label="Move to another list"
             title="Move to another list"
             className="shrink-0 text-slate-500 hover:text-blue-400"
@@ -218,45 +210,6 @@ export default function ItemRow({
         </>
       )}
 
-      {showServices && (
-        <div className="absolute right-2 top-full z-20 mt-1 w-48 rounded-xl border border-slate-600 bg-slate-900 p-1.5 shadow-xl">
-          <p className="px-2 pb-1 text-[10px] uppercase tracking-wider text-slate-500">
-            Watch it on
-          </p>
-          {services.map((service) => (
-            <button
-              key={service}
-              onClick={() => {
-                onSetService(item, service);
-                setShowServices(false);
-              }}
-              className="block w-full rounded-lg px-2 py-1.5 text-left text-sm text-slate-200 hover:bg-blue-500/20 hover:text-blue-100"
-            >
-              {service}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {showMove && (
-        <div className="absolute right-2 top-full z-20 mt-1 w-48 rounded-xl border border-slate-600 bg-slate-900 p-1.5 shadow-xl">
-          <p className="px-2 pb-1 text-[10px] uppercase tracking-wider text-slate-500">
-            Move to
-          </p>
-          {moveTargets.map((target) => (
-            <button
-              key={target.id}
-              onClick={() => {
-                onMove(item, target.id);
-                setShowMove(false);
-              }}
-              className="block w-full rounded-lg px-2 py-1.5 text-left text-sm text-slate-200 hover:bg-blue-500/20 hover:text-blue-100"
-            >
-              {target.name}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

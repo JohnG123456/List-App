@@ -1,5 +1,10 @@
 import type { Household, Item, List, Member } from "@/lib/types";
 
+/** "Ours" becomes "Ours'", not "Ours's". Profile names are often plural. */
+export function possessive(name: string) {
+  return /s$/i.test(name) ? `${name}\u2019` : `${name}\u2019s`;
+}
+
 export function formatTimestamp(iso: string) {
   const date = new Date(iso);
   const day = date.getDate();
@@ -145,7 +150,7 @@ export function watchVerdict(query: string, items: Item[], lists: List[]) {
 
   const match = matches[0];
   const list = watchLists.find((l) => l.id === match.list_id)!;
-  const where = [match.service, match.profile ? `${match.profile}'s profile` : null]
+  const where = [match.service, match.profile ? `${possessive(match.profile)} profile` : null]
     .filter(Boolean)
     .join(", ");
 

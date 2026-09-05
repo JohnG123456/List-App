@@ -125,6 +125,8 @@ export default function Home() {
   const [isReading, setIsReading] = useState(false);
   const [isEmailing, setIsEmailing] = useState(false);
 
+  const [movingItem, setMovingItem] = useState<Item | null>(null);
+  const [servicingItem, setServicingItem] = useState<Item | null>(null);
   const [watchQuery, setWatchQuery] = useState("");
   const [picks, setPicks] = useState<
     { item_id: string; text: string; service: string | null; reason: string }[] | null
@@ -282,7 +284,10 @@ export default function Home() {
     () => listsInGroup(lists, activeGroup),
     [lists, activeGroup]
   );
-  const moveTargets = useMemo(() => lists.filter((l) => !l.is_archive), [lists]);
+  const moveTargets = useMemo(
+    () => [...lists].sort((a, b) => a.position - b.position),
+    [lists]
+  );
   const isWatchGroup = useMemo(
     () => visibleLists.some((l) => l.kind === "watch"),
     [visibleLists]
@@ -687,17 +692,36 @@ export default function Home() {
   }
 
   async function moveItem(item: Item, listId: string) {
+    const target = listById(listId);
+    if (!target) return;
+
+    // An archive means finished, so arriving there ticks an item off and
+    // leaving it un-ticks. Otherwise a show dragged out of Watched sits in
+    // its new list looking like something still to do.
+    const source = listById(item.list_id);
+    const patch: Partial<Item> = { list_id: listId };
+    if (target.is_archive && !item.done) {
+      patch.done = true;
+      patch.done_at = new Date().toISOString();
+      patch.done_by = userId;
+    } else if (source?.is_archive && !target.is_archive && item.done) {
+      patch.done = false;
+      patch.done_at = null;
+      patch.done_by = null;
+    }
+
     const { error: updateError } = await supabase
       .from("items")
-      .update({ list_id: listId })
+      .update(patch)
       .eq("id", item.id);
+
     if (updateError) {
       setError(updateError.message);
       return;
     }
-    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, list_id: listId } : i)));
-    const target = listById(listId);
-    if (target) setInfoMessage(`Moved to ${target.name}.`);
+
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...patch } : i)));
+    setInfoMessage(`Moved to ${target.name}.`);
   }
 
   async function promoteItem(item: Item) {
@@ -926,19 +950,17 @@ export default function Home() {
                   key={item.id}
                   item={item}
                   list={list}
-                  moveTargets={moveTargets.filter((l) => l.id !== list.id)}
                   isSettling={settlingIds.has(item.id)}
                   isFresh={freshIds.has(item.id)}
                   addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                   doneByInitials={initialsFor(item.done_by, members, memberEmails)}
-                  services={household?.services ?? []}
                   onToggleDone={toggleDone}
                   onEdit={editItem}
                   onDelete={deleteItem}
-                  onMove={moveItem}
+                  onRequestMove={setMovingItem}
+                  onRequestService={setServicingItem}
                   onPromote={promoteItem}
                   onBumpEpisode={bumpItemEpisode}
-                  onSetService={setItemService}
                 />
               ))}
             </div>
@@ -968,19 +990,17 @@ export default function Home() {
                     key={item.id}
                     item={item}
                     list={list}
-                    moveTargets={moveTargets.filter((l) => l.id !== list.id)}
                     isSettling={false}
                     isFresh={false}
                     addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                     doneByInitials={initialsFor(item.done_by, members, memberEmails)}
-                    services={household?.services ?? []}
                     onToggleDone={toggleDone}
                     onEdit={editItem}
                     onDelete={deleteItem}
-                    onMove={moveItem}
+                    onRequestMove={setMovingItem}
+                    onRequestService={setServicingItem}
                     onPromote={promoteItem}
                     onBumpEpisode={bumpItemEpisode}
-                    onSetService={setItemService}
                   />
                 ))}
               </div>
@@ -1246,6 +1266,95 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/*
+        These sit at page level rather than inside the row. Each row carries a
+        backdrop blur, which creates its own stacking context, so a menu drawn
+        inside one is trapped there and the rows below paint straight over it.
+        A sheet is also the right shape on a phone, where a dropdown next to the
+        last row would fall off the bottom of the screen.
+      */}
+      {movingItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3"
+          onClick={() => setMovingItem(null)}
+        >
+          <div
+            role="dialog"
+            aria-label="Move to another list"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl"
+          >
+            <p className="px-1 pb-2 text-xs uppercase tracking-wider text-slate-500">
+              Move &ldquo;{movingItem.text}&rdquo; to
+            </p>
+            <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+              {moveTargets
+                .filter((l) => l.id !== movingItem.list_id)
+                .map((target) => (
+                  <button
+                    key={target.id}
+                    onClick={() => {
+                      void moveItem(movingItem, target.id);
+                      setMovingItem(null);
+                    }}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-blue-500/20 hover:text-blue-100"
+                  >
+                    {target.name}
+                    <span className="text-xs text-slate-500">
+                      {target.group_name}
+                      {target.is_archive ? " · archive" : ""}
+                    </span>
+                  </button>
+                ))}
+            </div>
+            <button
+              onClick={() => setMovingItem(null)}
+              className="mt-2 w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {servicingItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3"
+          onClick={() => setServicingItem(null)}
+        >
+          <div
+            role="dialog"
+            aria-label="Set the streaming service"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl"
+          >
+            <p className="px-1 pb-2 text-xs uppercase tracking-wider text-slate-500">
+              Where can we watch &ldquo;{servicingItem.text}&rdquo;?
+            </p>
+            <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+              {(household?.services ?? []).map((service) => (
+                <button
+                  key={service}
+                  onClick={() => {
+                    void setItemService(servicingItem, service);
+                    setServicingItem(null);
+                  }}
+                  className="block w-full rounded-lg px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-blue-500/20 hover:text-blue-100"
+                >
+                  {service}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setServicingItem(null)}
+              className="mt-2 w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
