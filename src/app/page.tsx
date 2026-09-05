@@ -42,7 +42,9 @@ const FRESH_HOLD_MS = 2600;
 
 const LAST_GROUP_KEY = "list-app:last-group";
 
-const CREATE_LIST_TRIGGERS = [
+// What you say to stop dictating and send it. Longer phrases sit first so
+// "create my list" doesn't leave a stray "my" behind after a looser match.
+const SUBMIT_TRIGGERS = [
   "create the list",
   "create my list",
   "create list",
@@ -50,20 +52,35 @@ const CREATE_LIST_TRIGGERS = [
   "make my list",
   "make list",
   "that's it",
-  "thats it",
+  "send it",
+  "go ahead",
+  "go",
+  "done",
 ];
 
-// Looks for a spoken stop-and-submit phrase and strips it out. Longer phrases
-// are checked first so e.g. "create my list" doesn't leave a stray "my".
+/**
+ * Finds a spoken submit phrase and strips it off.
+ *
+ * Only matched at the very end of what has been said so far. Matching anywhere
+ * would fire halfway through a sentence: "make a list of things for the shops"
+ * would submit on "make a list", and "go to the hardware store" on "go".
+ */
 function extractSubmitTrigger(text: string) {
-  const lower = text.toLowerCase();
-  for (const phrase of CREATE_LIST_TRIGGERS) {
-    const index = lower.indexOf(phrase);
-    if (index !== -1) {
-      const cleaned = (text.slice(0, index) + text.slice(index + phrase.length)).trim();
-      return { triggered: true, cleaned };
-    }
+  // Speech recognition adds trailing punctuation and curly apostrophes.
+  const normalised = text.replace(/\u2019/g, "'").replace(/[.!?,;\s]+$/, "");
+  const lower = normalised.toLowerCase();
+
+  for (const phrase of SUBMIT_TRIGGERS) {
+    if (!lower.endsWith(phrase)) continue;
+
+    const start = normalised.length - phrase.length;
+    // Must be a whole word, so "mango" doesn't end the list on "go".
+    if (start > 0 && /[a-z0-9]/i.test(normalised[start - 1])) continue;
+
+    const cleaned = normalised.slice(0, start).replace(/[.,;!?\s]+$/, "").trim();
+    return { triggered: true, cleaned };
   }
+
   return { triggered: false, cleaned: text };
 }
 
@@ -298,20 +315,18 @@ export default function Home() {
         transcript += event.results[i][0].transcript;
       }
 
-      const { triggered, cleaned } = extractSubmitTrigger(transcript);
-      const next = dictationRef.current
-        ? cleaned
-          ? `${dictationRef.current} ${cleaned}`
-          : dictationRef.current
-        : cleaned;
+      const combined = dictationRef.current
+        ? `${dictationRef.current} ${transcript}`
+        : transcript;
+      const { triggered, cleaned } = extractSubmitTrigger(combined.trim());
 
-      dictationRef.current = next;
-      setDictation(next);
+      dictationRef.current = cleaned;
+      setDictation(cleaned);
 
-      if (triggered) {
+      if (triggered && cleaned) {
         shouldRecordRef.current = false;
         recognitionRef.current?.stop();
-        void captureRef.current(next);
+        void captureRef.current(cleaned);
       }
     };
 
@@ -925,6 +940,9 @@ export default function Home() {
                 ))}
               </div>
             )}
+            <span className="text-xs text-slate-500">
+              {isRecording ? 'Say "go" when you\'re finished' : ""}
+            </span>
             <button
               onClick={toggleDictation}
               aria-label={isRecording ? "Stop dictation" : "Start dictation"}

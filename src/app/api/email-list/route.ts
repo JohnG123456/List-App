@@ -30,7 +30,12 @@ export async function POST(request: Request) {
   const gmailAppPassword = process.env.GMAIL_APP_PASSWORD;
   if (!gmailAddress || !gmailAppPassword) {
     return NextResponse.json(
-      { error: "Server is missing GMAIL_ADDRESS or GMAIL_APP_PASSWORD" },
+      {
+        error:
+          "Email isn't set up on this deployment. Add GMAIL_ADDRESS and " +
+          "GMAIL_APP_PASSWORD in the Vercel project settings, for the Preview " +
+          "environment as well as Production, then redeploy.",
+      },
       { status: 500 }
     );
   }
