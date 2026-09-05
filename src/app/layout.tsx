@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Voice Task List",
+  title: "Lists",
   description: "Dictate a list, get a task list.",
 };
 

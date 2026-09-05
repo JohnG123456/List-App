@@ -1,59 +1,46 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Check,
   ListChecks,
   Mail,
   Mic,
-  Pencil,
   Shield,
   Square,
   Trash2,
   Volume2,
-  X,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import type {
+  AllowedEmail,
+  Household,
+  Item,
+  ItemUpdate,
+  List,
+  Member,
+  NewItem,
+} from "@/lib/types";
+import {
+  groupItems,
+  groupNames,
+  initialsFor,
+  initialsFromEmail,
+  isSnoozed,
+  listsInGroup,
+} from "@/lib/display";
+import PillRail from "@/components/PillRail";
+import ItemRow from "@/components/ItemRow";
 
-type Task = {
-  id: string;
-  text: string;
-  done: boolean;
-  created_at: string;
-};
-
-type AllowedEmail = {
-  id: string;
-  email: string;
-};
-
-// Must match the email hardcoded into the RLS policies in
-// supabase/migrations/0002_allowed_emails.sql — update both if it changes.
-const ADMIN_EMAIL = "john@greenborough.com.au";
-
-// How long a task stays in the open list, crossed out, after being ticked off.
-// Long enough to see it happen before the row moves to the completed section.
+// How long a ticked item stays in the open list, crossed out, before it moves
+// to the done section. Long enough to see it happen.
 const COMPLETED_HOLD_MS = 1000;
 
-function formatTimestamp(iso: string) {
-  const date = new Date(iso);
-  const day = date.getDate();
-  const month = date.toLocaleString(undefined, { month: "short" });
-  const hours24 = date.getHours();
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-  const ampm = hours24 >= 12 ? "pm" : "am";
-  const hours = hours24 % 12 || 12;
-  return `${day} ${month} at ${hours}:${minutes} ${ampm}`;
-}
+// How long newly added items keep their green NEW state after you open the
+// list they landed in.
+const FRESH_HOLD_MS = 2600;
 
-function getInitials(email: string) {
-  const local = email.split("@")[0];
-  const parts = local.split(/[.\-_]+/).filter(Boolean);
-  const initials =
-    parts.length >= 2 ? parts[0][0] + parts[1][0] : local.slice(0, 2);
-  return initials.toUpperCase();
-}
+const LAST_GROUP_KEY = "list-app:last-group";
 
 const CREATE_LIST_TRIGGERS = [
   "create the list",
@@ -62,48 +49,73 @@ const CREATE_LIST_TRIGGERS = [
   "make the list",
   "make my list",
   "make list",
+  "that's it",
+  "thats it",
 ];
 
-// Looks for a spoken "create list" style command and strips it out. Longer
-// phrases are checked first so e.g. "create my list" doesn't leave a
-// stray "my" behind after a looser match.
-function extractCreateListTrigger(text: string) {
+// Looks for a spoken stop-and-submit phrase and strips it out. Longer phrases
+// are checked first so e.g. "create my list" doesn't leave a stray "my".
+function extractSubmitTrigger(text: string) {
   const lower = text.toLowerCase();
   for (const phrase of CREATE_LIST_TRIGGERS) {
     const index = lower.indexOf(phrase);
     if (index !== -1) {
-      const cleaned = (
-        text.slice(0, index) + text.slice(index + phrase.length)
-      ).trim();
+      const cleaned = (text.slice(0, index) + text.slice(index + phrase.length)).trim();
       return { triggered: true, cleaned };
     }
   }
   return { triggered: false, cleaned: text };
 }
 
+type Receipt = {
+  message: string;
+  jumps: { group: string; label: string }[];
+  undo: () => void | Promise<void>;
+};
+
 export default function Home() {
   const router = useRouter();
-  const supabase = createClient();
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loadingTasks, setLoadingTasks] = useState(true);
+  const supabase = useMemo(() => createClient(), []);
+
+  const [lists, setLists] = useState<List[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [household, setHousehold] = useState<Household | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isOwner, setIsOwner] = useState(false);
+
+  const [activeGroup, setActiveGroup] = useState<string>("");
+  const [showDone, setShowDone] = useState<Record<string, boolean>>({});
+  const [settlingIds, setSettlingIds] = useState<Set<string>>(new Set());
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
+  const [freshListIds, setFreshListIds] = useState<Set<string>>(new Set());
+
   const [dictation, setDictation] = useState("");
   const [isRecording, setIsRecording] = useState(false);
-  const [isParsing, setIsParsing] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [answer, setAnswer] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
-  const [showCompleted, setShowCompleted] = useState(false);
-  const [isReading, setIsReading] = useState(false);
-  const [isEmailingList, setIsEmailingList] = useState(false);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [isReading, setIsReading] = useState(false);
+  const [isEmailing, setIsEmailing] = useState(false);
+
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
   const [newAllowedEmail, setNewAllowedEmail] = useState("");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const [editingText, setEditingText] = useState("");
-  const [settlingTaskIds, setSettlingTaskIds] = useState<Set<string>>(new Set());
+
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // Dictation is started once and runs for minutes. Without this the voice
+  // submit would call the handler captured on the render that started it,
+  // which has stale items and no signed-in user.
+  const captureRef = useRef<(text: string) => Promise<void>>(async () => {});
   const shouldRecordRef = useRef(false);
   const dictationRef = useRef("");
+  const activeGroupRef = useRef("");
   const settleTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
@@ -114,33 +126,89 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    activeGroupRef.current = activeGroup;
+    if (activeGroup) {
+      try {
+        window.localStorage.setItem(LAST_GROUP_KEY, activeGroup);
+      } catch {
+        // Private browsing can refuse storage; remembering the last list is a
+        // convenience, not something worth failing over.
+      }
+    }
+  }, [activeGroup]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadData() {
-      const [tasksResult, userResult] = await Promise.all([
-        supabase.from("tasks").select("*").order("created_at", { ascending: true }),
-        supabase.auth.getUser(),
-      ]);
+      const [userResult, listsResult, itemsResult, householdResult, membersResult] =
+        await Promise.all([
+          supabase.auth.getUser(),
+          supabase.from("lists").select("*").order("position", { ascending: true }),
+          supabase
+            .from("items")
+            .select("*")
+            .is("archived_at", null)
+            .order("created_at", { ascending: true }),
+          supabase.from("households").select("*").limit(1).maybeSingle(),
+          supabase.from("household_members").select("*"),
+        ]);
 
       if (cancelled) return;
 
-      if (tasksResult.error) setError(tasksResult.error.message);
-      else setTasks(tasksResult.data ?? []);
+      const user = userResult.data.user;
+      setUserId(user?.id ?? null);
+      setUserEmail(user?.email ?? null);
 
-      const email = userResult.data.user?.email ?? null;
-      setUserEmail(email);
-      setLoadingTasks(false);
+      const firstError = listsResult.error ?? itemsResult.error;
+      if (firstError) setError(firstError.message);
 
-      if (email === ADMIN_EMAIL) {
-        const { data, error } = await supabase
+      const loadedLists = listsResult.data ?? [];
+      setLists(loadedLists);
+      setItems(itemsResult.data ?? []);
+      setHousehold(householdResult.data ?? null);
+
+      const loadedMembers = membersResult.data ?? [];
+      setMembers(loadedMembers);
+
+      const me = loadedMembers.find((m) => m.user_id === user?.id);
+      setIsOwner(Boolean(me?.is_owner));
+
+      // Fill in your own initials the first time, so shared lists have
+      // something to show against your name without a settings trip.
+      if (me && !me.initials && user?.email) {
+        const initials = initialsFromEmail(user.email);
+        await supabase
+          .from("household_members")
+          .update({ initials })
+          .eq("household_id", me.household_id)
+          .eq("user_id", user.id);
+        if (!cancelled) {
+          setMembers((prev) =>
+            prev.map((m) => (m.user_id === user.id ? { ...m, initials } : m))
+          );
+        }
+      }
+
+      const names = groupNames(loadedLists);
+      let remembered: string | null = null;
+      try {
+        remembered = window.localStorage.getItem(LAST_GROUP_KEY);
+      } catch {
+        remembered = null;
+      }
+      setActiveGroup(
+        remembered && names.includes(remembered) ? remembered : (names[0] ?? "")
+      );
+
+      setLoading(false);
+
+      if (me?.is_owner) {
+        const { data } = await supabase
           .from("allowed_emails")
           .select("id, email")
           .order("created_at", { ascending: true });
-
-        if (!cancelled) {
-          if (error) setError(error.message);
-          else setAllowedEmails(data ?? []);
-        }
+        if (!cancelled) setAllowedEmails(data ?? []);
       }
     }
 
@@ -152,11 +220,61 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     };
   }, []);
+
+  // New items hold their green state until you actually open the list they
+  // landed in, then settle a couple of seconds later.
+  useEffect(() => {
+    if (!activeGroup || freshListIds.size === 0) return;
+    const visible = listsInGroup(lists, activeGroup).map((l) => l.id);
+    if (!visible.some((id) => freshListIds.has(id))) return;
+
+    const timer = setTimeout(() => {
+      setFreshListIds((prev) => {
+        const next = new Set(prev);
+        for (const id of visible) next.delete(id);
+        return next;
+      });
+      setFreshIds((prev) => {
+        const next = new Set(prev);
+        for (const item of items) {
+          if (visible.includes(item.list_id)) next.delete(item.id);
+        }
+        return next;
+      });
+    }, FRESH_HOLD_MS);
+
+    return () => clearTimeout(timer);
+  }, [activeGroup, freshListIds, lists, items]);
+
+  const groups = useMemo(() => groupNames(lists), [lists]);
+  const visibleLists = useMemo(
+    () => listsInGroup(lists, activeGroup),
+    [lists, activeGroup]
+  );
+  const moveTargets = useMemo(() => lists.filter((l) => !l.is_archive), [lists]);
+
+  const memberEmails = useMemo(
+    () => (userId && userEmail ? { [userId]: userEmail } : {}),
+    [userId, userEmail]
+  );
+
+  const freshGroupNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const list of lists) {
+      if (freshListIds.has(list.id)) names.add(list.group_name);
+    }
+    return names;
+  }, [lists, freshListIds]);
+
+  const listById = useCallback(
+    (id: string) => lists.find((l) => l.id === id) ?? null,
+    [lists]
+  );
+
+  // ---------------------------------------------------------------- dictation
 
   function startRecognition() {
     const SpeechRecognition =
@@ -172,7 +290,7 @@ export default function Home() {
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = false;
-    recognition.lang = "en-US";
+    recognition.lang = "en-AU";
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let transcript = "";
@@ -180,7 +298,7 @@ export default function Home() {
         transcript += event.results[i][0].transcript;
       }
 
-      const { triggered, cleaned } = extractCreateListTrigger(transcript);
+      const { triggered, cleaned } = extractSubmitTrigger(transcript);
       const next = dictationRef.current
         ? cleaned
           ? `${dictationRef.current} ${cleaned}`
@@ -191,19 +309,13 @@ export default function Home() {
       setDictation(next);
 
       if (triggered) {
-        // Saying "create list" is treated as an explicit stop-and-submit —
-        // end dictation for real (no auto-restart) and submit right away
-        // rather than waiting for the user to tap the buttons.
         shouldRecordRef.current = false;
         recognitionRef.current?.stop();
-        handleTurnIntoList(next);
+        void captureRef.current(next);
       }
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // Permission/hardware failures are unrecoverable — stop for real.
-      // Other errors (e.g. "no-speech") are followed by onend, which
-      // decides whether to restart, so leave those alone here.
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         shouldRecordRef.current = false;
         setError("Microphone access was denied.");
@@ -212,9 +324,8 @@ export default function Home() {
 
     recognition.onend = () => {
       if (shouldRecordRef.current) {
-        // Safari/iOS ends recognition sessions after a short pause even
-        // with continuous set, so restart automatically to keep dictation
-        // going until the user explicitly stops it.
+        // Safari and iOS end recognition after a short pause even with
+        // continuous set, so restart until the user stops it themselves.
         startRecognition();
       } else {
         setIsRecording(false);
@@ -232,65 +343,224 @@ export default function Home() {
       recognitionRef.current?.stop();
       return;
     }
-
     shouldRecordRef.current = true;
     startRecognition();
   }
 
-  async function handleTurnIntoList(textOverride?: string) {
+  // ------------------------------------------------------------------ capture
+
+  function speak(text: string) {
+    if (!("speechSynthesis" in window)) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => setIsReading(false);
+    utterance.onerror = () => setIsReading(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setIsReading(true);
+  }
+
+  async function handleCapture(textOverride?: string) {
     const text = (textOverride ?? dictation).trim();
     if (!text) return;
-    setIsParsing(true);
+
+    setIsThinking(true);
     setError(null);
+    setInfoMessage(null);
+    setReceipt(null);
+    setAnswer(null);
 
     try {
-      const res = await fetch("/api/parse-tasks", {
+      const res = await fetch("/api/capture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, activeGroup: activeGroupRef.current }),
       });
-
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Failed to parse tasks");
+      if (!res.ok) throw new Error(data.error ?? "Could not read that");
 
-      const tasksToInsert: string[] = data.tasks ?? [];
-      if (tasksToInsert.length === 0) {
-        setError("No tasks were found in that text.");
-        return;
+      if (data.intent === "ask") {
+        setAnswer(data.answer);
+        speak(data.answer);
+      } else if (data.intent === "add") {
+        await applyAdd(data.items);
+      } else if (data.intent === "update") {
+        await applyUpdate(data.updates);
+      } else if (data.intent === "do") {
+        await applyAction(data.action);
       }
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not signed in");
-
-      const { data: inserted, error: insertError } = await supabase
-        .from("tasks")
-        .insert(tasksToInsert.map((text) => ({ text, user_id: user.id })))
-        .select();
-
-      if (insertError) throw insertError;
-
-      setTasks((prev) => [...prev, ...(inserted ?? [])]);
       setDictation("");
       dictationRef.current = "";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
-      setIsParsing(false);
+      setIsThinking(false);
     }
   }
 
-  // Keeps a just-ticked task in the open list, crossed out, so it doesn't
-  // vanish out from under the finger that tapped it.
+  async function applyAdd(newItems: NewItem[]) {
+    if (!userId) throw new Error("Not signed in");
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("items")
+      .insert(newItems.map((item) => ({ ...item, created_by: userId })))
+      .select();
+
+    if (insertError) throw insertError;
+    const rows = inserted ?? [];
+    if (rows.length === 0) return;
+
+    setItems((prev) => [...prev, ...rows]);
+    setFreshIds((prev) => new Set([...prev, ...rows.map((r) => r.id)]));
+    setFreshListIds((prev) => new Set([...prev, ...rows.map((r) => r.list_id)]));
+
+    // The receipt is what makes auto-routing safe: it says where everything
+    // went, jumps you there, and puts it all back in one tap.
+    const counts = new Map<string, number>();
+    for (const row of rows) counts.set(row.list_id, (counts.get(row.list_id) ?? 0) + 1);
+
+    const jumps = [...counts.entries()].map(([listId, n]) => {
+      const list = listById(listId);
+      return {
+        group: list?.group_name ?? "",
+        label: `${n} → ${list?.name ?? "a list"}`,
+      };
+    });
+
+    setReceipt({
+      message: rows.length === 1 ? "Added" : `Added ${rows.length}`,
+      jumps,
+      undo: async () => {
+        const ids = rows.map((r) => r.id);
+        const { error: deleteError } = await supabase.from("items").delete().in("id", ids);
+        if (deleteError) {
+          setError(deleteError.message);
+          return;
+        }
+        setItems((prev) => prev.filter((i) => !ids.includes(i.id)));
+        setReceipt(null);
+      },
+    });
+  }
+
+  async function applyUpdate(updates: ItemUpdate[]) {
+    const before = new Map<string, Item>();
+    const changedNames: string[] = [];
+
+    for (const update of updates) {
+      const existing = items.find((i) => i.id === update.item_id);
+      if (!existing) continue;
+      before.set(existing.id, existing);
+      changedNames.push(existing.text);
+
+      // Only fields Claude actually filled in are touched; the rest stay put.
+      const patch: Partial<Item> = {};
+      if (update.text) patch.text = update.text;
+      if (update.qty) patch.qty = update.qty;
+      if (update.service) patch.service = update.service;
+      if (update.progress) patch.progress = update.progress;
+      if (update.profile) patch.profile = update.profile;
+      if (update.done !== null) {
+        patch.done = update.done;
+        patch.done_at = update.done ? new Date().toISOString() : null;
+        patch.done_by = update.done ? userId : null;
+      }
+
+      const { error: updateError } = await supabase
+        .from("items")
+        .update(patch)
+        .eq("id", existing.id);
+
+      if (updateError) throw updateError;
+
+      setItems((prev) =>
+        prev.map((i) => (i.id === existing.id ? { ...i, ...patch } : i))
+      );
+      setFreshIds((prev) => new Set(prev).add(existing.id));
+      setFreshListIds((prev) => new Set(prev).add(existing.list_id));
+    }
+
+    if (before.size === 0) {
+      setError("Could not tell which item that was about.");
+      return;
+    }
+
+    const first = [...before.values()][0];
+    const list = listById(first.list_id);
+
+    setReceipt({
+      message: `Updated ${changedNames.join(", ")}`,
+      jumps: list ? [{ group: list.group_name, label: `Go to ${list.name}` }] : [],
+      undo: async () => {
+        for (const original of before.values()) {
+          await supabase
+            .from("items")
+            .update({
+              text: original.text,
+              qty: original.qty,
+              service: original.service,
+              progress: original.progress,
+              profile: original.profile,
+              done: original.done,
+              done_at: original.done_at,
+              done_by: original.done_by,
+            })
+            .eq("id", original.id);
+        }
+        setItems((prev) =>
+          prev.map((i) => (before.has(i.id) ? before.get(i.id)! : i))
+        );
+        setReceipt(null);
+      },
+    });
+  }
+
+  async function applyAction(action: {
+    type: "read_aloud" | "email" | "none";
+    list_ids: string[];
+    needs_confirmation: boolean;
+  }) {
+    const targets =
+      action.list_ids.length > 0
+        ? (action.list_ids.map(listById).filter(Boolean) as List[])
+        : visibleLists;
+
+    if (action.type === "read_aloud") {
+      readLists(targets);
+      return;
+    }
+
+    if (action.type === "email") {
+      if (
+        action.needs_confirmation &&
+        !window.confirm(`Email ${targets.map((l) => l.name).join(" and ")}?`)
+      ) {
+        return;
+      }
+      await emailLists(targets);
+      return;
+    }
+
+    setInfoMessage("That one isn't wired up yet.");
+  }
+
+  // Voice submissions go through this, so they always run the current handler.
+  useEffect(() => {
+    captureRef.current = async (text: string) => {
+      await handleCapture(text);
+    };
+  });
+
+  // -------------------------------------------------------------- item actions
+
   function holdSettling(id: string) {
     clearTimeout(settleTimers.current.get(id));
-    setSettlingTaskIds((prev) => new Set(prev).add(id));
+    setSettlingIds((prev) => new Set(prev).add(id));
     settleTimers.current.set(
       id,
       setTimeout(() => {
         settleTimers.current.delete(id);
-        setSettlingTaskIds((prev) => {
+        setSettlingIds((prev) => {
           const next = new Set(prev);
           next.delete(id);
           return next;
@@ -302,7 +572,7 @@ export default function Home() {
   function releaseSettling(id: string) {
     clearTimeout(settleTimers.current.get(id));
     settleTimers.current.delete(id);
-    setSettlingTaskIds((prev) => {
+    setSettlingIds((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Set(prev);
       next.delete(id);
@@ -310,118 +580,71 @@ export default function Home() {
     });
   }
 
-  async function toggleDone(task: Task) {
-    const done = !task.done;
+  async function toggleDone(item: Item) {
+    const done = !item.done;
+    const patch = {
+      done,
+      done_at: done ? new Date().toISOString() : null,
+      done_by: done ? userId : null,
+    };
 
-    // Flip locally first so the tick responds on the tap. The Supabase round
-    // trip runs behind it and only surfaces if it fails.
-    setTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, done } : t))
-    );
-    if (done) holdSettling(task.id);
-    else releaseSettling(task.id);
+    // Flip locally first so the tick responds on the tap. The round trip runs
+    // behind it and only surfaces if it fails.
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...patch } : i)));
+    if (done) holdSettling(item.id);
+    else releaseSettling(item.id);
 
-    const { error } = await supabase
-      .from("tasks")
-      .update({ done })
-      .eq("id", task.id);
+    const { error: updateError } = await supabase
+      .from("items")
+      .update(patch)
+      .eq("id", item.id);
 
-    if (error) {
-      setError(error.message);
-      setTasks((prev) =>
-        prev.map((t) => (t.id === task.id ? { ...t, done: !done } : t))
-      );
-      releaseSettling(task.id);
+    if (updateError) {
+      setError(updateError.message);
+      setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
+      releaseSettling(item.id);
     }
   }
 
-  async function deleteTask(task: Task) {
-    if (!window.confirm(`Delete "${task.text}"?`)) return;
-
-    const { error } = await supabase.from("tasks").delete().eq("id", task.id);
-
-    if (error) {
-      setError(error.message);
-      return;
-    }
-
-    setTasks((prev) => prev.filter((t) => t.id !== task.id));
-  }
-
-  function startEditingTask(task: Task) {
-    setEditingTaskId(task.id);
-    setEditingText(task.text);
-  }
-
-  function cancelEditingTask() {
-    setEditingTaskId(null);
-    setEditingText("");
-  }
-
-  async function saveEditingTask(task: Task) {
-    const text = editingText.trim();
-    if (!text || text === task.text) {
-      cancelEditingTask();
-      return;
-    }
-
-    const { error } = await supabase
-      .from("tasks")
+  async function editItem(item: Item, text: string) {
+    const { error: updateError } = await supabase
+      .from("items")
       .update({ text })
-      .eq("id", task.id);
-
-    if (error) {
-      setError(error.message);
+      .eq("id", item.id);
+    if (updateError) {
+      setError(updateError.message);
       return;
     }
-
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, text } : t)));
-    cancelEditingTask();
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, text } : i)));
   }
 
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
-
-  async function addAllowedEmail(e: React.FormEvent) {
-    e.preventDefault();
-    const email = newAllowedEmail.trim().toLowerCase();
-    if (!email) return;
-
-    const { data, error } = await supabase
-      .from("allowed_emails")
-      .insert({ email })
-      .select("id, email")
-      .single();
-
-    if (error) {
-      setError(error.message);
+  async function deleteItem(item: Item) {
+    if (!window.confirm(`Delete "${item.text}"?`)) return;
+    const { error: deleteError } = await supabase.from("items").delete().eq("id", item.id);
+    if (deleteError) {
+      setError(deleteError.message);
       return;
     }
-
-    setAllowedEmails((prev) => [...prev, data]);
-    setNewAllowedEmail("");
+    setItems((prev) => prev.filter((i) => i.id !== item.id));
   }
 
-  async function removeAllowedEmail(entry: AllowedEmail) {
-    if (!window.confirm(`Remove access for ${entry.email}?`)) return;
-
-    const { error } = await supabase
-      .from("allowed_emails")
-      .delete()
-      .eq("id", entry.id);
-
-    if (error) {
-      setError(error.message);
+  async function moveItem(item: Item, listId: string) {
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ list_id: listId })
+      .eq("id", item.id);
+    if (updateError) {
+      setError(updateError.message);
       return;
     }
-
-    setAllowedEmails((prev) => prev.filter((e) => e.id !== entry.id));
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, list_id: listId } : i)));
+    const target = listById(listId);
+    if (target) setInfoMessage(`Moved to ${target.name}.`);
   }
 
-  function handleReadList() {
+  // ----------------------------------------------------------- read and email
+
+  function readLists(targets: List[]) {
     if (!("speechSynthesis" in window)) {
       setError("Reading aloud isn't supported in this browser.");
       return;
@@ -433,136 +656,170 @@ export default function Home() {
       return;
     }
 
-    const openTasks = tasks.filter((t) => !t.done);
-    const text =
-      openTasks.length === 0
-        ? "You have no open tasks."
-        : `You have ${openTasks.length} open task${
-            openTasks.length === 1 ? "" : "s"
-          }: ${openTasks.map((t) => t.text).join(". ")}.`;
+    const parts: string[] = [];
+    for (const list of targets) {
+      const open = items.filter(
+        (i) => i.list_id === list.id && !i.done && !isSnoozed(i)
+      );
+      if (open.length === 0) continue;
+      parts.push(`${list.name}: ${open.map((i) => i.text).join(". ")}.`);
+    }
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onend = () => setIsReading(false);
-    utterance.onerror = () => setIsReading(false);
-
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-    setIsReading(true);
+    speak(parts.length === 0 ? "Nothing open on that list." : parts.join(" "));
   }
 
-  async function handleEmailList() {
-    setIsEmailingList(true);
+  async function emailLists(targets: List[]) {
+    setIsEmailing(true);
     setError(null);
     setInfoMessage(null);
 
     try {
-      const res = await fetch("/api/email-list", { method: "POST" });
+      const res = await fetch("/api/email-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listIds: targets.map((l) => l.id) }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to send email");
       setInfoMessage("Sent to your inbox.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
-      setIsEmailingList(false);
+      setIsEmailing(false);
     }
   }
 
-  const openTasks = tasks.filter((t) => !t.done);
-  const completedTasks = tasks.filter((t) => t.done);
+  // ------------------------------------------------------------------- admin
 
-  // What the two sections actually render: a task that was just ticked off
-  // lingers in the open list until its hold expires.
-  const visibleOpenTasks = tasks.filter(
-    (t) => !t.done || settlingTaskIds.has(t.id)
-  );
-  const visibleCompletedTasks = completedTasks.filter(
-    (t) => !settlingTaskIds.has(t.id)
-  );
+  async function addAllowedEmail(e: React.FormEvent) {
+    e.preventDefault();
+    const email = newAllowedEmail.trim().toLowerCase();
+    if (!email) return;
 
-  function renderTask(task: Task) {
-    const isEditing = editingTaskId === task.id;
-    const isSettling = settlingTaskIds.has(task.id);
+    const { data, error: insertError } = await supabase
+      .from("allowed_emails")
+      .insert({ email })
+      .select("id, email")
+      .single();
+
+    if (insertError) {
+      setError(insertError.message);
+      return;
+    }
+    setAllowedEmails((prev) => [...prev, data]);
+    setNewAllowedEmail("");
+  }
+
+  async function removeAllowedEmail(entry: AllowedEmail) {
+    if (!window.confirm(`Remove access for ${entry.email}?`)) return;
+    const { error: deleteError } = await supabase
+      .from("allowed_emails")
+      .delete()
+      .eq("id", entry.id);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+    setAllowedEmails((prev) => prev.filter((e) => e.id !== entry.id));
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }
+
+  // ------------------------------------------------------------------ render
+
+  function renderList(list: List, withHeading: boolean) {
+    const mine = items.filter((i) => i.list_id === list.id);
+    const open = mine.filter(
+      (i) => (!i.done || settlingIds.has(i.id)) && !isSnoozed(i)
+    );
+    const doneItems = mine.filter((i) => i.done && !settlingIds.has(i.id));
+    const snoozed = mine.filter((i) => !i.done && isSnoozed(i));
+    const wantDone = showDone[list.id] ?? list.show_done;
+    const pool = list.is_archive ? mine : open;
 
     return (
-      <div
-        key={task.id}
-        className={`flex items-center gap-2.5 rounded-xl border border-slate-700/60 bg-slate-900/50 px-3 py-2 backdrop-blur transition-opacity duration-300 ${
-          isSettling ? "opacity-60" : "opacity-100"
-        }`}
-      >
-        <button
-          onClick={() => toggleDone(task)}
-          aria-label={task.done ? "Mark as not done" : "Mark as done"}
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition ${
-            task.done
-              ? "border-blue-500 bg-blue-500"
-              : "border-slate-600 hover:border-blue-500"
-          }`}
-        >
-          {task.done && <Check className="h-4 w-4 text-white" />}
-        </button>
+      <div key={list.id} className="space-y-1.5">
+        {withHeading && (
+          <div className="flex items-baseline gap-2 pt-2">
+            <h2 className="text-base font-semibold text-slate-100">{list.name}</h2>
+            <span className="text-xs text-slate-500">
+              {list.is_archive ? `${mine.length} titles` : `${open.length} open`}
+            </span>
+          </div>
+        )}
 
-        {isEditing ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              saveEditingTask(task);
-            }}
-            className="flex flex-1 items-center gap-2"
-          >
-            <input
-              autoFocus
-              value={editingText}
-              onChange={(e) => setEditingText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") cancelEditingTask();
-              }}
-              className="flex-1 rounded-lg border border-blue-500/50 bg-slate-800/60 px-2 py-1 text-sm text-slate-100 outline-none focus:border-blue-500"
-            />
-            <button
-              type="submit"
-              aria-label="Save"
-              className="shrink-0 text-blue-400 hover:text-blue-300"
-            >
-              <Check className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={cancelEditingTask}
-              aria-label="Cancel edit"
-              className="shrink-0 text-slate-500 hover:text-red-400"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </form>
+        {pool.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            {list.is_archive ? "Nothing here yet." : "All clear."}
+          </p>
         ) : (
-          <>
-            <div className="flex-1">
-              <p
-                className={`text-sm leading-snug ${
-                  task.done ? "text-slate-500 line-through" : "text-slate-100"
-                }`}
-              >
-                {task.text}
-              </p>
-              <p className="text-xs leading-snug text-slate-500">
-                {formatTimestamp(task.created_at)}
-              </p>
+          groupItems(list, pool, household).map((group) => (
+            <div key={group.heading ?? "all"} className="space-y-1.5">
+              {group.heading && (
+                <p className="pt-2 text-xs uppercase tracking-wider text-slate-500">
+                  {group.heading}
+                </p>
+              )}
+              {group.items.map((item) => (
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  list={list}
+                  moveTargets={moveTargets.filter((l) => l.id !== list.id)}
+                  isSettling={settlingIds.has(item.id)}
+                  isFresh={freshIds.has(item.id)}
+                  addedByInitials={initialsFor(item.created_by, members, memberEmails)}
+                  doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                  onToggleDone={toggleDone}
+                  onEdit={editItem}
+                  onDelete={deleteItem}
+                  onMove={moveItem}
+                />
+              ))}
             </div>
+          ))
+        )}
+
+        {snoozed.length > 0 && (
+          <p className="text-xs text-slate-500">{snoozed.length} snoozed until tomorrow</p>
+        )}
+
+        {!list.is_archive && doneItems.length > 0 && (
+          <>
             <button
-              onClick={() => startEditingTask(task)}
-              aria-label="Edit task"
-              className="shrink-0 text-slate-500 hover:text-blue-400"
+              onClick={() =>
+                setShowDone((prev) => ({ ...prev, [list.id]: !wantDone }))
+              }
+              className="mt-1 flex items-center gap-2 rounded-full border border-orange-500/40 bg-orange-500/10 px-3 py-1.5 text-xs text-orange-300"
             >
-              <Pencil className="h-4 w-4" />
+              <ListChecks className="h-3.5 w-3.5" />
+              {wantDone ? "Hide" : "Show"} {doneItems.length}{" "}
+              {list.auto_clear ? "bought" : "done"}
             </button>
-            <button
-              onClick={() => deleteTask(task)}
-              aria-label="Delete task"
-              className="shrink-0 text-slate-500 hover:text-red-400"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            {wantDone && (
+              <div className="space-y-1.5 pt-1">
+                {doneItems.map((item) => (
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    list={list}
+                    moveTargets={moveTargets.filter((l) => l.id !== list.id)}
+                    isSettling={false}
+                    isFresh={false}
+                    addedByInitials={initialsFor(item.created_by, members, memberEmails)}
+                    doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                    onToggleDone={toggleDone}
+                    onEdit={editItem}
+                    onDelete={deleteItem}
+                    onMove={moveItem}
+                  />
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -570,19 +827,19 @@ export default function Home() {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 p-6">
+    <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-5 p-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Voice Task List</h1>
+        <h1 className="text-2xl font-bold text-white">Lists</h1>
         <button
           onClick={handleSignOut}
           title="Sign out"
           className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white shadow-md"
         >
-          {userEmail ? getInitials(userEmail) : "?"}
+          {userEmail ? initialsFromEmail(userEmail) : "?"}
         </button>
       </div>
 
-      {userEmail === ADMIN_EMAIL && (
+      {isOwner && (
         <div className="space-y-3 rounded-2xl border border-slate-700/60 bg-slate-900/50 p-4 backdrop-blur">
           <button
             onClick={() => setShowAdminPanel((v) => !v)}
@@ -633,6 +890,17 @@ export default function Home() {
         </div>
       )}
 
+      {groups.length > 0 && (
+        <PillRail
+          groups={groups}
+          lists={lists}
+          items={items}
+          activeGroup={activeGroup}
+          freshGroups={freshGroupNames}
+          onSelect={setActiveGroup}
+        />
+      )}
+
       <div className="space-y-4">
         <div className="rounded-2xl border border-blue-500/20 bg-slate-900/70 p-4 shadow-lg shadow-blue-950/30 backdrop-blur">
           <textarea
@@ -641,8 +909,8 @@ export default function Home() {
               dictationRef.current = e.target.value;
               setDictation(e.target.value);
             }}
-            placeholder="Dictate or type a list of tasks..."
-            rows={4}
+            placeholder="Say anything — for any list, or ask a question..."
+            rows={3}
             className="w-full resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none"
           />
           <div className="mt-2 flex items-center gap-2">
@@ -666,23 +934,46 @@ export default function Home() {
                   : "bg-slate-800 text-slate-200 hover:bg-slate-700"
               }`}
             >
-              {isRecording ? (
-                <Square className="h-4 w-4" />
-              ) : (
-                <Mic className="h-4 w-4" />
-              )}
+              {isRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </button>
           </div>
         </div>
 
         <button
-          onClick={() => handleTurnIntoList()}
-          disabled={isParsing || !dictation.trim()}
+          onClick={() => handleCapture()}
+          disabled={isThinking || !dictation.trim()}
           className="w-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-3 text-sm font-semibold text-white shadow-[0_0_25px_rgba(37,99,235,0.35)] transition hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] disabled:opacity-50 disabled:shadow-none"
         >
-          {isParsing ? "Creating list..." : "Create list"}
+          {isThinking ? "Working it out..." : "Go"}
         </button>
       </div>
+
+      {receipt && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-900/25 px-3 py-2 text-sm">
+          <b className="font-semibold text-emerald-200">{receipt.message}</b>
+          {receipt.jumps.map((jump) => (
+            <button
+              key={jump.label}
+              onClick={() => setActiveGroup(jump.group)}
+              className="rounded-full border border-emerald-500/45 px-2.5 py-0.5 text-xs text-emerald-300 hover:bg-emerald-500/15"
+            >
+              {jump.label}
+            </button>
+          ))}
+          <button
+            onClick={() => void receipt.undo()}
+            className="ml-auto text-xs text-slate-300 underline"
+          >
+            Undo
+          </button>
+        </div>
+      )}
+
+      {answer && (
+        <div className="rounded-xl border border-blue-500/40 bg-blue-950/30 px-3 py-2 text-sm text-blue-100">
+          {answer}
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
       {infoMessage && <p className="text-sm text-green-400">{infoMessage}</p>}
@@ -690,62 +981,37 @@ export default function Home() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={handleReadList}
-            disabled={!isReading && openTasks.length === 0}
+            onClick={() => readLists(visibleLists)}
             className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm backdrop-blur disabled:opacity-40 ${
               isReading
                 ? "border-red-500/40 bg-red-500/10 text-red-300"
                 : "border-slate-700 bg-slate-900/60 text-slate-200"
             }`}
           >
-            {isReading ? (
-              <Square className="h-4 w-4" />
-            ) : (
-              <Volume2 className="h-4 w-4" />
-            )}
+            {isReading ? <Square className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             {isReading ? "Stop reading" : "Read aloud"}
           </button>
           <button
-            onClick={handleEmailList}
-            disabled={isEmailingList || openTasks.length === 0}
+            onClick={() => void emailLists(visibleLists)}
+            disabled={isEmailing}
             className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 backdrop-blur disabled:opacity-40"
           >
             <Mail className="h-4 w-4" />
-            {isEmailingList ? "Sending..." : "Email me"}
+            {isEmailing ? "Sending..." : "Email me"}
           </button>
-          {visibleCompletedTasks.length > 0 && (
-            <button
-              onClick={() => setShowCompleted((v) => !v)}
-              className="ml-auto flex items-center gap-2 rounded-full border border-orange-500/40 bg-orange-500/10 px-4 py-2 text-sm text-orange-300"
-            >
-              <ListChecks className="h-4 w-4" />
-              {showCompleted
-                ? "Hide completed"
-                : `${visibleCompletedTasks.length} completed`}
-            </button>
-          )}
         </div>
 
-        <div className="space-y-1.5">
-          {loadingTasks ? (
-            <p className="text-sm text-slate-400">Loading tasks...</p>
-          ) : tasks.length === 0 ? (
-            <p className="text-sm text-slate-400">No tasks yet.</p>
-          ) : visibleOpenTasks.length === 0 ? (
-            <p className="text-sm text-slate-400">
-              No open tasks — nice work.
-            </p>
-          ) : (
-            visibleOpenTasks.map(renderTask)
-          )}
-        </div>
-
-        {showCompleted && visibleCompletedTasks.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-xs font-medium uppercase text-slate-500">
-              Completed
-            </p>
-            {visibleCompletedTasks.map(renderTask)}
+        {loading ? (
+          <p className="text-sm text-slate-400">Loading...</p>
+        ) : lists.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            No lists yet. Run the household migration in Supabase, then reload.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {visibleLists.map((list) =>
+              renderList(list, visibleLists.length > 1)
+            )}
           </div>
         )}
       </div>

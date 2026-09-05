@@ -137,7 +137,7 @@ export default function LoginPage() {
     <main className="flex flex-1 items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-6 rounded-2xl border border-blue-500/20 bg-slate-900/70 p-6 shadow-xl shadow-blue-950/40 backdrop-blur">
         <div className="space-y-1 text-center">
-          <h1 className="text-2xl font-bold text-white">Voice Task List</h1>
+          <h1 className="text-2xl font-bold text-white">Lists</h1>
           <p className="text-sm text-slate-400">
             {mode === "code"
               ? codeStep === "request"
