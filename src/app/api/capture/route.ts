@@ -226,6 +226,13 @@ export async function POST(request: Request) {
     "Choose the intent carefully. A sentence naming a show and an episode number",
     "is almost always an update to that show, not a new item. A question is an",
     "'ask' even when it names something that could be added.",
+    "",
+    "When adding, one entry per distinct thing, and never merge two things into",
+    "one entry. People routinely say everything in a single breath, and one",
+    "sentence usually carries items belonging to several different lists:",
+    "\"we need milk, book the car service, and we started Severance on Netflix\"",
+    "is three entries on three different lists, not one. Work through the whole",
+    "sentence to the end and account for every thing mentioned in it.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -234,11 +241,14 @@ export async function POST(request: Request) {
   try {
     message = await anthropic.messages.create({
       model: "claude-opus-5",
-      max_tokens: 4000,
-      // Reasoning stays on, which Opus 5 needs to call tools reliably, but at
-      // low effort: this is a small classification with someone standing in a
-      // supermarket waiting for it.
-      output_config: { effort: "low" },
+      // Reasoning is on by default and its tokens come out of this budget, so
+      // a tight ceiling truncates the tool call rather than the prose. A
+      // truncated arrival looked exactly like "it only found one item".
+      max_tokens: 16000,
+      // This was set to low effort for latency and that was the wrong trade.
+      // Low effort consolidates, and consolidating is precisely the failure
+      // here: three unrelated things in one sentence came back as one item.
+      output_config: { effort: "high" },
       system,
       tools: [ROUTE_TOOL],
       tool_choice: { type: "tool", name: "route_capture" },
@@ -253,6 +263,16 @@ export async function POST(request: Request) {
     (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
   );
 
+  // Running out of room mid-tool-call yields a partial answer that looks like
+  // a confident short one. Say so instead of acting on half a sentence.
+  if (message.stop_reason === "max_tokens") {
+    console.error("[capture] hit max_tokens", { chars: text.length });
+    return NextResponse.json(
+      { error: "That was cut short before it finished. Try saying it again." },
+      { status: 502 }
+    );
+  }
+
   if (!toolUse) {
     return NextResponse.json(
       { error: "Could not work out what that meant. Try rephrasing." },
@@ -261,6 +281,14 @@ export async function POST(request: Request) {
   }
 
   const input = toolUse.input as ToolInput;
+
+  console.log("[capture]", {
+    chars: text.length,
+    intent: input.intent,
+    items: input.items?.length ?? 0,
+    updates: input.updates?.length ?? 0,
+    stop: message.stop_reason,
+  });
   const validListIds = new Set(lists.map((l) => l.id));
   const validItemIds = new Set(items.map((i) => i.id));
 
