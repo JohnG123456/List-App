@@ -14,6 +14,7 @@ Supabase so it's the same on every device.
    - `0002_allowed_emails.sql` — creates the invite-only allow-list (see [Restricting who can sign up](#restricting-who-can-sign-up)) and seeds it with the first user's email.
    - `0003_households_and_lists.sql` — households, lists, and the move from one flat task list to many. **Take a database export before running this one**: it renames `tasks` to `items`, rewrites every security policy, and backfills existing rows. A free Supabase project has no point-in-time recovery to fall back on.
    - `0004_list_transitions.sql` — lets a list say where a promoted or ticked item goes, which is how "Start watching" and filing a finished show under Watched work without the app knowing anything about television.
+   - `0005_household_management.sql` — the functions behind the settings screen. Adding someone needs a lookup in `auth.users`, which the browser can't see and shouldn't be able to, so it runs server-side with an ownership check.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**, add `http://localhost:3000/auth/callback` (and your deployed URL's equivalent) to the redirect allow list — used for the password sign-up confirmation email.
@@ -80,39 +81,16 @@ Vercel's production branch is `main` — every push to it publishes a Production
 
 ## Sharing lists with someone else
 
-Migration `0003` gives every existing user their own household, because merging
-two people into one is a decision a migration shouldn't make on your behalf. To
-put a second person in yours, in the Supabase SQL editor:
+1. Add their email under **Who can sign up** in Settings.
+2. Have them sign up.
+3. Add them by email under **Household** in Settings.
 
-```sql
--- 1. Find the user ids and household ids involved.
-select id, email from auth.users;
+Anything they'd already built up on their own comes with them, and their private
+lists stay private. Only the household owner can add or remove people.
 
-select m.user_id, m.household_id, m.is_owner
-from public.household_members m;
-
--- 2. Move their lists across, so nothing on those lists is lost. Their private
---    lists stay private to them afterwards.
-update public.lists
-set household_id = '<your-household-id>'
-where household_id = '<their-household-id>';
-
--- 3. Move them across too, as a member rather than an owner.
-delete from public.household_members where household_id = '<their-household-id>';
-
-insert into public.household_members (household_id, user_id, initials, is_owner)
-values ('<your-household-id>', '<their-user-id>', 'AB', false);
-
--- 4. The now-empty household can go.
-delete from public.households where id = '<their-household-id>';
-```
-
-Someone who signs up **after** migration `0003` gets no household at all, and the
-app will tell them there are no lists yet. Add them with step 3 alone, using your
-household id. A settings screen replaces all of this later.
-
-To make a list private to one person, set `private_to` to their user id; to share
-it with the whole household, set it back to null.
+A list is shared with the whole household unless it's marked private to one
+person. Careful with that switch: making a shared list private hides it from
+everyone else, and only the person who did it can share it again.
 
 ## The TV lists
 
@@ -157,10 +135,14 @@ is history it says so rather than adding nothing silently.
 
 ## Settings
 
-`/settings` holds the household, the streaming services, the supermarket order,
-the lists, and the sign-up allow-list. It's a separate screen because the main
-screen is for the lists: a panel opened twice a year shouldn't sit above them.
-Editing these from the UI is still to come; for now they're set in the database.
+`/settings` holds the household and its people, the streaming services, the
+viewing profiles, the supermarket order, the lists, and the sign-up allow-list.
+It's a separate screen because the main screen is for the lists: a panel opened
+twice a year shouldn't sit above them.
+
+Everything saves as you change it — there's no Save button, because there's
+nothing here you'd want to fill in and then abandon. A failed save puts the old
+value back rather than leaving the screen showing something that isn't true.
 
 ## Voice commands
 
