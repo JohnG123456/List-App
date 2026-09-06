@@ -7,6 +7,8 @@ import {
   ListChecks,
   Mail,
   Mic,
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
   Camera,
   Eraser,
   Repeat,
@@ -25,6 +27,7 @@ import type {
   Member,
   NewItem,
 } from "@/lib/types";
+import type { SortDirection } from "@/lib/display";
 import {
   addDays,
   bumpEpisode,
@@ -50,6 +53,7 @@ const COMPLETED_HOLD_MS = 1000;
 const FRESH_HOLD_MS = 2600;
 
 const LAST_GROUP_KEY = "list-app:last-group";
+const SORT_KEY = "list-app:sort";
 
 // What you say to stop dictating and send it. Longer phrases sit first so
 // "create my list" doesn't leave a stray "my" behind after a looser match.
@@ -134,6 +138,7 @@ export default function Home() {
   const [pickerFor, setPickerFor] = useState<"read" | "email" | null>(null);
   const [pickedLists, setPickedLists] = useState<Set<string>>(new Set());
   const [globalQuery, setGlobalQuery] = useState("");
+  const [sortDirs, setSortDirs] = useState<Record<string, SortDirection>>({});
   const [isReadingPhoto, setIsReadingPhoto] = useState(false);
   const [servicingItem, setServicingItem] = useState<Item | null>(null);
   const [watchQuery, setWatchQuery] = useState("");
@@ -222,6 +227,13 @@ export default function Home() {
             prev.map((m) => (m.user_id === user.id ? { ...m, initials } : m))
           );
         }
+      }
+
+      try {
+        const storedSort = window.localStorage.getItem(SORT_KEY);
+        if (storedSort) setSortDirs(JSON.parse(storedSort));
+      } catch {
+        // A remembered sort order is a convenience, not worth failing over.
       }
 
       const names = groupNames(loadedLists);
@@ -342,6 +354,21 @@ export default function Home() {
     }
     return names;
   }, [lists, freshListIds]);
+
+  function toggleSort(list: List) {
+    setSortDirs((prev) => {
+      const next: Record<string, SortDirection> = {
+        ...prev,
+        [list.id]: (prev[list.id] ?? "newest") === "newest" ? "oldest" : "newest",
+      };
+      try {
+        window.localStorage.setItem(SORT_KEY, JSON.stringify(next));
+      } catch {
+        // Not worth failing over.
+      }
+      return next;
+    });
+  }
 
   /** Switching pills resets the state that only makes sense on one screen. */
   function selectGroup(group: string) {
@@ -1172,7 +1199,7 @@ export default function Home() {
             {list.is_archive ? "Nothing here yet." : "All clear."}
           </p>
         ) : (
-          groupItems(list, pool, household).map((group) => (
+          groupItems(list, pool, household, sortDirs[list.id] ?? "newest").map((group) => (
             <div key={group.heading ?? "all"} className="space-y-1.5">
               {group.heading && (
                 <p className="pt-2 text-xs uppercase tracking-wider text-slate-500">
@@ -1216,6 +1243,22 @@ export default function Home() {
               </button>
             ))}
           </div>
+        )}
+
+        {list.group_by === "due" && pool.length > 1 && (
+          <button
+            onClick={() => toggleSort(list)}
+            className="mt-1 flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300"
+          >
+            {(sortDirs[list.id] ?? "newest") === "newest" ? (
+              <ArrowDownWideNarrow className="h-3.5 w-3.5" />
+            ) : (
+              <ArrowUpNarrowWide className="h-3.5 w-3.5" />
+            )}
+            {(sortDirs[list.id] ?? "newest") === "newest"
+              ? "Newest first"
+              : "Oldest first"}
+          </button>
         )}
 
         {list.auto_clear && (

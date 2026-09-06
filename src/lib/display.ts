@@ -99,10 +99,13 @@ const DUE_ORDER = ["Today", "This week", "Later", "Whenever"];
  * value for the grouping field collects in its own bucket at the end, so a
  * missing service reads as a visible loose end rather than a silent gap.
  */
+export type SortDirection = "newest" | "oldest";
+
 export function groupItems(
   list: List,
   items: Item[],
-  household: Household | null
+  household: Household | null,
+  direction: SortDirection = "newest"
 ): ItemGroup[] {
   if (!list.group_by) return [{ heading: null, items }];
 
@@ -117,16 +120,18 @@ export function groupItems(
     return DUE_ORDER.filter((heading) => buckets.has(heading)).map((heading) => ({
       // A list where everything is undated needs no headings at all.
       heading: buckets.size === 1 && heading === "Whenever" ? null : heading,
-      // Today reads forwards from today into what has been sitting there
-      // longest. The dated sections ahead read soonest first, because there
-      // "next" is the useful end.
-      items: buckets
-        .get(heading)!
-        .sort((a, b) =>
-          heading === "Today"
-            ? (b.due_on ?? "").localeCompare(a.due_on ?? "")
-            : (a.due_on ?? "9999").localeCompare(b.due_on ?? "9999")
-        ),
+      // The sections keep their order, because that order is the priority.
+      // What flips is the order within each: newest first opens Today on
+      // today and works back, oldest first opens on what has waited longest.
+      // Undated items fall back to when they were added, so the choice still
+      // means something in the Whenever section.
+      items: buckets.get(heading)!.sort((a, b) => {
+        const left = a.due_on ?? a.created_at.slice(0, 10);
+        const right = b.due_on ?? b.created_at.slice(0, 10);
+        return direction === "newest"
+          ? right.localeCompare(left)
+          : left.localeCompare(right);
+      }),
     }));
   }
 

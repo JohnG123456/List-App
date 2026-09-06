@@ -179,6 +179,11 @@ Set one with the calendar button, or just say it: "clean the car today", "book
 the car service before Friday". No day mentioned means no due day rather than a
 guess.
 
+The **Newest first / Oldest first** button flips the order within each section
+and remembers your choice. The sections themselves keep their order, because
+that order is the priority. Undated items fall back to when they were added, so
+the choice still means something in the Whenever section.
+
 **Snooze** (the clock button) hides something until 5am tomorrow. It's not done
 and not deleted, and the count sits at the bottom of the list with a way to wake
 it, so nothing quietly disappears.
