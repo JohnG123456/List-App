@@ -2,20 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   ListChecks,
   Mail,
   Mic,
+  Eraser,
+  Repeat,
   Search,
-  Shield,
+  Settings,
   Sparkles,
   Square,
-  Trash2,
   Volume2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type {
-  AllowedEmail,
   Household,
   Item,
   ItemUpdate,
@@ -106,7 +107,6 @@ export default function Home() {
 
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [isOwner, setIsOwner] = useState(false);
 
   const [activeGroup, setActiveGroup] = useState<string>("");
   const [showDone, setShowDone] = useState<Record<string, boolean>>({});
@@ -133,10 +133,6 @@ export default function Home() {
   >(null);
   const [isPicking, setIsPicking] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
-
-  const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
-  const [newAllowedEmail, setNewAllowedEmail] = useState("");
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   // Dictation is started once and runs for minutes. Without this the voice
@@ -202,7 +198,6 @@ export default function Home() {
       setMembers(loadedMembers);
 
       const me = loadedMembers.find((m) => m.user_id === user?.id);
-      setIsOwner(Boolean(me?.is_owner));
 
       // Fill in your own initials the first time, so shared lists have
       // something to show against your name without a settings trip.
@@ -233,13 +228,6 @@ export default function Home() {
 
       setLoading(false);
 
-      if (me?.is_owner) {
-        const { data } = await supabase
-          .from("allowed_emails")
-          .select("id, email")
-          .order("created_at", { ascending: true });
-        if (!cancelled) setAllowedEmails(data ?? []);
-      }
     }
 
     loadData();
@@ -803,6 +791,111 @@ export default function Home() {
     }
   }
 
+  /**
+   * A shopping list is a session, not a record. Without this, every week's shop
+   * stacks up until you are scrolling past hundreds of ticked items to find
+   * this week's. It archives rather than deletes, because that history is what
+   * "the usuals" below is learned from.
+   */
+  async function clearBought(list: List) {
+    const bought = items.filter((i) => i.list_id === list.id && i.done);
+    if (bought.length === 0) return;
+    if (!window.confirm(`Clear ${bought.length} bought from ${list.name}?`)) return;
+
+    const ids = bought.map((i) => i.id);
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ archived_at: new Date().toISOString() })
+      .in("id", ids);
+
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    setItems((prev) => prev.filter((i) => !ids.includes(i.id)));
+    setInfoMessage(`Cleared ${bought.length}. Ready for next week.`);
+  }
+
+  /**
+   * What you buy most weeks, worked out from what you have cleared before
+   * rather than a list you keep by hand. Entirely local: no API call, no cost.
+   */
+  async function addUsuals(list: List) {
+    setError(null);
+    setInfoMessage(null);
+
+    const { data, error: historyError } = await supabase
+      .from("items")
+      .select("text, qty, aisle")
+      .eq("list_id", list.id)
+      .not("archived_at", "is", null)
+      .order("archived_at", { ascending: false })
+      .limit(500);
+
+    if (historyError) {
+      setError(historyError.message);
+      return;
+    }
+
+    const history = data ?? [];
+    const alreadyHere = new Set(
+      items
+        .filter((i) => i.list_id === list.id && !i.done)
+        .map((i) => i.text.trim().toLowerCase())
+    );
+
+    // Counted case-insensitively, keeping the spelling used most recently.
+    const seen = new Map<
+      string,
+      { text: string; qty: string | null; aisle: string | null; count: number }
+    >();
+    for (const row of history) {
+      const key = row.text.trim().toLowerCase();
+      if (!key || alreadyHere.has(key)) continue;
+      const existing = seen.get(key);
+      if (existing) existing.count += 1;
+      else seen.set(key, { text: row.text, qty: row.qty, aisle: row.aisle, count: 1 });
+    }
+
+    // Twice is the threshold: bought once is a one-off, not a usual.
+    const usuals = [...seen.values()]
+      .filter((u) => u.count >= 2)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12);
+
+    if (usuals.length === 0) {
+      setInfoMessage(
+        "Not enough history yet. After a few shops this fills itself in."
+      );
+      return;
+    }
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("items")
+      .insert(
+        usuals.map((u) => ({
+          list_id: list.id,
+          text: u.text,
+          qty: u.qty,
+          aisle: u.aisle,
+          created_by: userId,
+        }))
+      )
+      .select();
+
+    if (insertError) {
+      setError(insertError.message);
+      return;
+    }
+
+    const rows = inserted ?? [];
+    setItems((prev) => [...prev, ...rows]);
+    setFreshIds((prev) => new Set([...prev, ...rows.map((r) => r.id)]));
+    setFreshListIds((prev) => new Set(prev).add(list.id));
+    setInfoMessage(`Added ${rows.length} you usually buy.`);
+  }
+
   // ----------------------------------------------------------- read and email
 
   function readLists(targets: List[]) {
@@ -848,40 +941,6 @@ export default function Home() {
     } finally {
       setIsEmailing(false);
     }
-  }
-
-  // ------------------------------------------------------------------- admin
-
-  async function addAllowedEmail(e: React.FormEvent) {
-    e.preventDefault();
-    const email = newAllowedEmail.trim().toLowerCase();
-    if (!email) return;
-
-    const { data, error: insertError } = await supabase
-      .from("allowed_emails")
-      .insert({ email })
-      .select("id, email")
-      .single();
-
-    if (insertError) {
-      setError(insertError.message);
-      return;
-    }
-    setAllowedEmails((prev) => [...prev, data]);
-    setNewAllowedEmail("");
-  }
-
-  async function removeAllowedEmail(entry: AllowedEmail) {
-    if (!window.confirm(`Remove access for ${entry.email}?`)) return;
-    const { error: deleteError } = await supabase
-      .from("allowed_emails")
-      .delete()
-      .eq("id", entry.id);
-    if (deleteError) {
-      setError(deleteError.message);
-      return;
-    }
-    setAllowedEmails((prev) => prev.filter((e) => e.id !== entry.id));
   }
 
   async function handleSignOut() {
@@ -971,8 +1030,18 @@ export default function Home() {
           <p className="text-xs text-slate-500">{snoozed.length} snoozed until tomorrow</p>
         )}
 
+        {list.auto_clear && (
+          <button
+            onClick={() => void addUsuals(list)}
+            className="mt-1 flex items-center gap-2 rounded-full border border-blue-500/45 bg-blue-500/15 px-3 py-1.5 text-xs text-blue-100"
+          >
+            <Repeat className="h-3.5 w-3.5" />
+            Add the usuals
+          </button>
+        )}
+
         {!list.is_archive && doneItems.length > 0 && (
-          <>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() =>
                 setShowDone((prev) => ({ ...prev, [list.id]: !wantDone }))
@@ -983,29 +1052,39 @@ export default function Home() {
               {wantDone ? "Hide" : "Show"} {doneItems.length}{" "}
               {list.auto_clear ? "bought" : "done"}
             </button>
-            {wantDone && (
-              <div className="space-y-1.5 pt-1">
-                {doneItems.map((item) => (
-                  <ItemRow
-                    key={item.id}
-                    item={item}
-                    list={list}
-                    isSettling={false}
-                    isFresh={false}
-                    addedByInitials={initialsFor(item.created_by, members, memberEmails)}
-                    doneByInitials={initialsFor(item.done_by, members, memberEmails)}
-                    onToggleDone={toggleDone}
-                    onEdit={editItem}
-                    onDelete={deleteItem}
-                    onRequestMove={setMovingItem}
-                    onRequestService={setServicingItem}
-                    onPromote={promoteItem}
-                    onBumpEpisode={bumpItemEpisode}
-                  />
-                ))}
-              </div>
+            {list.auto_clear && (
+              <button
+                onClick={() => void clearBought(list)}
+                className="mt-1 flex items-center gap-2 rounded-full border border-slate-600 bg-slate-800/60 px-3 py-1.5 text-xs text-slate-300"
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                Clear {doneItems.length} bought
+              </button>
             )}
-          </>
+          </div>
+        )}
+
+        {!list.is_archive && doneItems.length > 0 && wantDone && (
+          <div className="space-y-1.5 pt-1">
+            {doneItems.map((item) => (
+              <ItemRow
+                key={item.id}
+                item={item}
+                list={list}
+                isSettling={false}
+                isFresh={false}
+                addedByInitials={initialsFor(item.created_by, members, memberEmails)}
+                doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                onToggleDone={toggleDone}
+                onEdit={editItem}
+                onDelete={deleteItem}
+                onRequestMove={setMovingItem}
+                onRequestService={setServicingItem}
+                onPromote={promoteItem}
+                onBumpEpisode={bumpItemEpisode}
+              />
+            ))}
+          </div>
         )}
       </div>
     );
@@ -1015,65 +1094,24 @@ export default function Home() {
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-5 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">Lists</h1>
-        <button
-          onClick={handleSignOut}
-          title="Sign out"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white shadow-md"
-        >
-          {userEmail ? initialsFromEmail(userEmail) : "?"}
-        </button>
-      </div>
-
-      {isOwner && (
-        <div className="space-y-3 rounded-2xl border border-slate-700/60 bg-slate-900/50 p-4 backdrop-blur">
-          <button
-            onClick={() => setShowAdminPanel((v) => !v)}
-            className="flex items-center gap-2 text-sm text-slate-300"
+        <div className="flex items-center gap-2">
+          <Link
+            href="/settings"
+            aria-label="Settings"
+            title="Settings"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700 bg-slate-900/60 text-slate-400 hover:text-slate-200"
           >
-            <Shield className="h-4 w-4" />
-            {showAdminPanel ? "Hide" : "Manage"} access ({allowedEmails.length})
+            <Settings className="h-4 w-4" />
+          </Link>
+          <button
+            onClick={handleSignOut}
+            title="Sign out"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white shadow-md"
+          >
+            {userEmail ? initialsFromEmail(userEmail) : "?"}
           </button>
-
-          {showAdminPanel && (
-            <div className="space-y-2">
-              <form onSubmit={addAllowedEmail} className="flex gap-2">
-                <input
-                  type="email"
-                  required
-                  placeholder="Email to allow"
-                  value={newAllowedEmail}
-                  onChange={(e) => setNewAllowedEmail(e.target.value)}
-                  className="flex-1 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500"
-                />
-                <button
-                  type="submit"
-                  className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
-                >
-                  Add
-                </button>
-              </form>
-
-              <div className="space-y-1">
-                {allowedEmails.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="flex items-center justify-between rounded-lg bg-slate-800/40 px-3 py-2 text-sm text-slate-200"
-                  >
-                    {entry.email}
-                    <button
-                      onClick={() => removeAllowedEmail(entry)}
-                      aria-label={`Remove access for ${entry.email}`}
-                      className="shrink-0 text-slate-500 hover:text-red-400"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
-      )}
+      </div>
 
       {groups.length > 0 && (
         <PillRail

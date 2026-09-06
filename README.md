@@ -137,3 +137,27 @@ no match.
 never invents one. Recommending something new would mean knowing what is on Stan
 this month, which changes constantly; a confident suggestion for something that
 left the service six months ago is worse than no suggestion at all.
+
+## Groceries
+
+The list groups into supermarket sections and orders them by the household's
+`aisle_order`, so it reads in the order you walk the shop rather than the order
+things were said. Claude tags each item with a section at capture time; anything
+it can't place collects at the end under "Not sorted yet".
+
+**Clear bought** archives the ticked items rather than deleting them. A shopping
+list is a session, not a record — without it, every week's shop stacks up until
+you're scrolling past hundreds of ticked items to find this week's.
+
+**Add the usuals** reads that archive and puts back what you buy most weeks:
+counted case-insensitively, anything bought twice or more, most frequent first,
+skipping whatever is already on the list. It runs entirely in the browser, so it
+costs nothing and works as well on the tenth shop as the hundredth. Before there
+is history it says so rather than adding nothing silently.
+
+## Settings
+
+`/settings` holds the household, the streaming services, the supermarket order,
+the lists, and the sign-up allow-list. It's a separate screen because the main
+screen is for the lists: a panel opened twice a year shouldn't sit above them.
+Editing these from the UI is still to come; for now they're set in the database.
