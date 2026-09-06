@@ -34,6 +34,9 @@ export default function SettingsPage() {
   >([]);
   const [newAllowedEmail, setNewAllowedEmail] = useState("");
   const [newMemberEmail, setNewMemberEmail] = useState("");
+  const [newListName, setNewListName] = useState("");
+  const [newListKind, setNewListKind] = useState<"todo" | "shop" | "plain">("todo");
+  const [newListPrivate, setNewListPrivate] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -226,6 +229,48 @@ export default function SettingsPage() {
 
     if (updateError) setError(updateError.message);
     else flash("Initials saved");
+  }
+
+  /**
+   * Each shape of list is a few column values rather than a new code path, so
+   * creating one is picking which shape you want. A to-do list groups by when
+   * things are due; a shopping list groups by aisle and clears itself.
+   */
+  async function addList(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newListName.trim();
+    if (!name || !household || !userId) return;
+
+    const shape =
+      newListKind === "todo"
+        ? { kind: "general", group_by: "due", auto_clear: false }
+        : newListKind === "shop"
+          ? { kind: "shop", group_by: "aisle", auto_clear: true }
+          : { kind: "general", group_by: null, auto_clear: false };
+
+    const position = lists.reduce((max, l) => Math.max(max, l.position), 0) + 1;
+
+    const { data, error: insertError } = await supabase
+      .from("lists")
+      .insert({
+        household_id: household.id,
+        name,
+        group_name: name,
+        position,
+        private_to: newListPrivate ? userId : null,
+        ...shape,
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      setError(insertError.message);
+      return;
+    }
+
+    setLists((prev) => [...prev, data]);
+    setNewListName("");
+    flash(`${name} created`);
   }
 
   async function addAllowedEmail(e: React.FormEvent) {
@@ -502,6 +547,59 @@ export default function SettingsPage() {
                 </div>
               ))}
             </div>
+
+            <form onSubmit={addList} className="space-y-2 border-t border-slate-700/60 pt-3">
+              <p className={caption}>Add a list</p>
+              <input
+                value={newListName}
+                onChange={(e) => setNewListName(e.target.value)}
+                placeholder="What to call it"
+                className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500"
+              />
+              <div className="flex flex-wrap gap-1.5 text-xs">
+                {(
+                  [
+                    ["todo", "To-dos"],
+                    ["shop", "Shopping"],
+                    ["plain", "Just a list"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setNewListKind(value)}
+                    className={`rounded-full border px-3 py-1 ${
+                      newListKind === value
+                        ? "border-blue-500/60 bg-blue-500/15 text-blue-100"
+                        : "border-slate-700 text-slate-400"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setNewListPrivate((v) => !v)}
+                  className={`rounded-full border px-3 py-1 ${
+                    newListPrivate
+                      ? "border-slate-600 bg-slate-700/40 text-slate-300"
+                      : "border-pink-500/40 bg-pink-500/10 text-pink-200"
+                  }`}
+                >
+                  {newListPrivate ? "Private to you" : "Shared"}
+                </button>
+              </div>
+              <button
+                type="submit"
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
+              >
+                Create
+              </button>
+              <p className={caption}>
+                To-dos group into today and this week. Shopping groups by aisle
+                and clears itself after a shop.
+              </p>
+            </form>
           </div>
 
           {isOwner && (

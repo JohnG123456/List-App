@@ -138,6 +138,12 @@ is history it says so rather than adding nothing silently.
 
 ## Settings
 
+Lists are created here too, by name plus what shape you want: **To-dos** groups
+into today and this week, **Shopping** groups by aisle and clears itself after a
+shop, **Just a list** does neither. Each shape is a few column values rather than
+a new code path. New lists default to private, so anyone in the household can
+keep their own to-do list beside the shared ones.
+
 `/settings` holds the household and its people, the streaming services, the
 viewing profiles, the supermarket order, the lists, and the sign-up allow-list.
 It's a separate screen because the main screen is for the lists: a panel opened
