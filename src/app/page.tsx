@@ -636,10 +636,11 @@ export default function Home() {
     list_ids: string[];
     needs_confirmation: boolean;
   }) {
-    const targets =
+    const targets = (
       action.list_ids.length > 0
         ? (action.list_ids.map(listById).filter(Boolean) as List[])
-        : visibleLists;
+        : visibleLists
+    ).filter((l) => !l.is_archive);
 
     if (action.type === "read_aloud") {
       readLists(targets);
@@ -1076,7 +1077,10 @@ export default function Home() {
     }
 
     const parts: string[] = [];
-    for (const list of targets) {
+    // An archive is a record, not a list of things to do. Relying on its items
+    // being marked done was fragile: anything moved in without being ticked
+    // got read out, and Watched only grows.
+    for (const list of targets.filter((l) => !l.is_archive)) {
       const open = items.filter(
         (i) => i.list_id === list.id && !i.done && !isSnoozed(i)
       );
@@ -1087,7 +1091,13 @@ export default function Home() {
     speak(parts.length === 0 ? "Nothing open on that list." : parts.join(" "));
   }
 
-  async function emailLists(targets: List[]) {
+  async function emailLists(allTargets: List[]) {
+    const targets = allTargets.filter((l) => !l.is_archive);
+    if (targets.length === 0) {
+      setInfoMessage("Nothing to send from an archive.");
+      return;
+    }
+
     setIsEmailing(true);
     setError(null);
     setInfoMessage(null);

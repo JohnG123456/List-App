@@ -117,9 +117,16 @@ export function groupItems(
     return DUE_ORDER.filter((heading) => buckets.has(heading)).map((heading) => ({
       // A list where everything is undated needs no headings at all.
       heading: buckets.size === 1 && heading === "Whenever" ? null : heading,
+      // Today reads forwards from today into what has been sitting there
+      // longest. The dated sections ahead read soonest first, because there
+      // "next" is the useful end.
       items: buckets
         .get(heading)!
-        .sort((a, b) => (a.due_on ?? "9999").localeCompare(b.due_on ?? "9999")),
+        .sort((a, b) =>
+          heading === "Today"
+            ? (b.due_on ?? "").localeCompare(a.due_on ?? "")
+            : (a.due_on ?? "9999").localeCompare(b.due_on ?? "9999")
+        ),
     }));
   }
 

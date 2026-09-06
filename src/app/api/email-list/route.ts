@@ -54,7 +54,13 @@ export async function POST(request: Request) {
 
   // Row-level security keeps this to lists this person is allowed to see, so
   // a list id from somewhere else simply returns nothing.
-  const listQuery = supabase.from("lists").select("id, name, position").order("position");
+  // Archives are excluded whichever way the lists were chosen: Watched is a
+  // record of what you finished, and it only ever grows.
+  const listQuery = supabase
+    .from("lists")
+    .select("id, name, position")
+    .eq("is_archive", false)
+    .order("position");
   const { data: lists, error: listError } = listIds.length
     ? await listQuery.in("id", listIds)
     : await listQuery;
