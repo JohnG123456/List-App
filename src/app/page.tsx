@@ -7,6 +7,7 @@ import {
   ListChecks,
   Mail,
   Mic,
+  Camera,
   Eraser,
   Repeat,
   Search,
@@ -25,6 +26,7 @@ import type {
   NewItem,
 } from "@/lib/types";
 import {
+  addDays,
   bumpEpisode,
   groupItems,
   groupNames,
@@ -32,6 +34,7 @@ import {
   initialsFromEmail,
   isSnoozed,
   listsInGroup,
+  localDateKey,
   watchVerdict,
 } from "@/lib/display";
 import { matchLocalCommand } from "@/lib/commands";
@@ -127,6 +130,11 @@ export default function Home() {
   const [isEmailing, setIsEmailing] = useState(false);
 
   const [movingItem, setMovingItem] = useState<Item | null>(null);
+  const [duingItem, setDuingItem] = useState<Item | null>(null);
+  const [pickerFor, setPickerFor] = useState<"read" | "email" | null>(null);
+  const [pickedLists, setPickedLists] = useState<Set<string>>(new Set());
+  const [globalQuery, setGlobalQuery] = useState("");
+  const [isReadingPhoto, setIsReadingPhoto] = useState(false);
   const [servicingItem, setServicingItem] = useState<Item | null>(null);
   const [watchQuery, setWatchQuery] = useState("");
   const [picks, setPicks] = useState<
@@ -243,6 +251,42 @@ export default function Home() {
     };
   }, []);
 
+  // Live sync, so ticking milk off in the aisle shows on the other phone. The
+  // incoming row always wins: it is the database's version, and losing your own
+  // optimistic edit for a moment is better than the two of you disagreeing.
+  useEffect(() => {
+    const channel = supabase
+      .channel("items-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "items" },
+        (payload) => {
+          const row = payload.new as Item | null;
+          const old = payload.old as { id?: string } | null;
+
+          if (payload.eventType === "DELETE" && old?.id) {
+            setItems((prev) => prev.filter((i) => i.id !== old.id));
+            return;
+          }
+          if (!row?.id) return;
+          if (row.archived_at) {
+            setItems((prev) => prev.filter((i) => i.id !== row.id));
+            return;
+          }
+          setItems((prev) =>
+            prev.some((i) => i.id === row.id)
+              ? prev.map((i) => (i.id === row.id ? row : i))
+              : [...prev, row]
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [supabase]);
+
   // New items hold their green state until you actually open the list they
   // landed in, then settle a couple of seconds later.
   useEffect(() => {
@@ -306,6 +350,14 @@ export default function Home() {
     setPicks(null);
     setShowArchive(false);
   }
+
+  const searchHits = useMemo(() => {
+    const query = globalQuery.trim().toLowerCase();
+    if (query.length < 2) return null;
+    return items
+      .filter((i) => !i.archived_at && i.text.toLowerCase().includes(query))
+      .slice(0, 25);
+  }, [globalQuery, items]);
 
   const listById = useCallback(
     (id: string) => lists.find((l) => l.id === id) ?? null,
@@ -523,6 +575,7 @@ export default function Home() {
       if (update.service) patch.service = update.service;
       if (update.progress) patch.progress = update.progress;
       if (update.profile) patch.profile = update.profile;
+      if (update.due_on !== undefined) patch.due_on = update.due_on;
       if (update.done !== null) {
         patch.done = update.done;
         patch.done_at = update.done ? new Date().toISOString() : null;
@@ -933,6 +986,81 @@ export default function Home() {
     setInfoMessage(`Added ${rows.length} you usually buy.`);
   }
 
+  async function setDue(item: Item, due_on: string | null) {
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, due_on } : i)));
+
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ due_on })
+      .eq("id", item.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
+    }
+  }
+
+  /**
+   * Out of the list and out of the count until 5am tomorrow. Not done, not
+   * deleted, and counted at the bottom of the list so nothing quietly vanishes.
+   */
+  async function snoozeItem(item: Item) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(5, 0, 0, 0);
+    const hidden_until = tomorrow.toISOString();
+
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, hidden_until } : i)));
+    setInfoMessage(`Snoozed ${item.text} until tomorrow.`);
+
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ hidden_until })
+      .eq("id", item.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
+    }
+  }
+
+  async function wakeItem(item: Item) {
+    setItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, hidden_until: null } : i))
+    );
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ hidden_until: null })
+      .eq("id", item.id);
+    if (updateError) setError(updateError.message);
+  }
+
+  /** Reads a photographed list straight into the capture box for review. */
+  async function readPhoto(file: File) {
+    setIsReadingPhoto(true);
+    setError(null);
+
+    try {
+      const body = new FormData();
+      body.append("photo", file);
+      const res = await fetch("/api/read-photo", { method: "POST", body });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not read that photo");
+
+      // Deliberately lands in the box rather than straight onto a list: a
+      // photo of someone's handwriting is the least reliable input here, so
+      // it gets a look before it becomes rows.
+      const text = data.text as string;
+      dictationRef.current = text;
+      setDictation(text);
+      setInfoMessage("Read from the photo. Check it, then press Go.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsReadingPhoto(false);
+    }
+  }
+
   // ----------------------------------------------------------- read and email
 
   function readLists(targets: List[]) {
@@ -1057,6 +1185,8 @@ export default function Home() {
                   onRequestService={setServicingItem}
                   onPromote={promoteItem}
                   onBumpEpisode={bumpItemEpisode}
+                  onRequestDue={setDuingItem}
+                  onSnooze={snoozeItem}
                 />
               ))}
             </div>
@@ -1064,7 +1194,18 @@ export default function Home() {
         )}
 
         {snoozed.length > 0 && (
-          <p className="text-xs text-slate-500">{snoozed.length} snoozed until tomorrow</p>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+            {snoozed.length} snoozed
+            {snoozed.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => void wakeItem(item)}
+                className="rounded-full border border-slate-700 px-2 py-0.5 text-slate-400 hover:text-slate-200"
+              >
+                {item.text} &middot; wake
+              </button>
+            ))}
+          </div>
         )}
 
         {list.auto_clear && (
@@ -1119,6 +1260,8 @@ export default function Home() {
                 onRequestService={setServicingItem}
                 onPromote={promoteItem}
                 onBumpEpisode={bumpItemEpisode}
+                onRequestDue={setDuingItem}
+                onSnooze={snoozeItem}
               />
             ))}
           </div>
@@ -1174,6 +1317,9 @@ export default function Home() {
             className="w-full resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none"
           />
           <div className="mt-2 flex items-center gap-2">
+            <span className="mr-auto text-xs text-slate-500">
+              {isRecording ? 'Say "go" when you\'re finished' : ""}
+            </span>
             {isRecording && (
               <div className="flex h-5 items-end gap-0.5">
                 {[0, 1, 2, 3, 4].map((i) => (
@@ -1185,13 +1331,32 @@ export default function Home() {
                 ))}
               </div>
             )}
-            <span className="text-xs text-slate-500">
-              {isRecording ? 'Say "go" when you\'re finished' : ""}
-            </span>
+            <label
+              title="Photograph a list"
+              className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-slate-800 text-slate-200 hover:bg-slate-700"
+            >
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="sr-only"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void readPhoto(file);
+                  e.target.value = "";
+                }}
+              />
+              {isReadingPhoto ? (
+                <span className="text-[10px]">...</span>
+              ) : (
+                <Camera className="h-4 w-4" />
+              )}
+              <span className="sr-only">Photograph a list</span>
+            </label>
             <button
               onClick={toggleDictation}
               aria-label={isRecording ? "Stop dictation" : "Start dictation"}
-              className={`ml-auto flex h-10 w-10 items-center justify-center rounded-full transition ${
+              className={`flex h-10 w-10 items-center justify-center rounded-full transition ${
                 isRecording
                   ? "bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.5)]"
                   : "bg-slate-800 text-slate-200 hover:bg-slate-700"
@@ -1242,6 +1407,17 @@ export default function Home() {
       {infoMessage && <p className="text-sm text-green-400">{infoMessage}</p>}
 
       <div className="space-y-4">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <input
+            value={globalQuery}
+            onChange={(e) => setGlobalQuery(e.target.value)}
+            placeholder="Search every list"
+            aria-label="Search every list"
+            className="w-full rounded-xl border border-slate-700 bg-slate-900/60 py-2 pl-9 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-blue-500"
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => readLists(visibleLists)}
@@ -1262,7 +1438,79 @@ export default function Home() {
             <Mail className="h-4 w-4" />
             {isEmailing ? "Sending..." : "Email me"}
           </button>
+          <button
+            onClick={() => {
+              setPickedLists(new Set(visibleLists.map((l) => l.id)));
+              setPickerFor(pickerFor ? null : "read");
+            }}
+            className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-400"
+          >
+            Choose lists
+          </button>
         </div>
+
+        {pickerFor && (
+          <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900/70 p-3">
+            <div className="flex gap-2 text-xs">
+              {(["read", "email"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setPickerFor(mode)}
+                  className={`rounded-full border px-3 py-1 ${
+                    pickerFor === mode
+                      ? "border-blue-500/60 bg-blue-500/15 text-blue-100"
+                      : "border-slate-700 text-slate-400"
+                  }`}
+                >
+                  {mode === "read" ? "Read aloud" : "Email"}
+                </button>
+              ))}
+            </div>
+            {lists
+              .filter((l) => !l.is_archive)
+              .map((list) => (
+                <label
+                  key={list.id}
+                  className="flex items-center gap-2 text-sm text-slate-200"
+                >
+                  <input
+                    type="checkbox"
+                    checked={pickedLists.has(list.id)}
+                    onChange={(e) => {
+                      setPickedLists((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(list.id);
+                        else next.delete(list.id);
+                        return next;
+                      });
+                    }}
+                    className="h-4 w-4 accent-blue-500"
+                  />
+                  {list.name}
+                </label>
+              ))}
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  const chosen = lists.filter((l) => pickedLists.has(l.id));
+                  if (chosen.length === 0) return;
+                  if (pickerFor === "read") readLists(chosen);
+                  else void emailLists(chosen);
+                  setPickerFor(null);
+                }}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white"
+              >
+                {pickerFor === "read" ? "Read them" : "Send"}
+              </button>
+              <button
+                onClick={() => setPickerFor(null)}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-400"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {isWatchGroup && (
           <div className="space-y-2">
@@ -1327,7 +1575,44 @@ export default function Home() {
           </div>
         )}
 
-        {loading ? (
+        {searchHits ? (
+          <div className="space-y-1.5">
+            <p className="text-xs uppercase tracking-wider text-slate-500">
+              {searchHits.length} across every list
+            </p>
+            {searchHits.map((item) => {
+              const list = listById(item.list_id);
+              if (!list) return null;
+              return (
+                <div key={item.id} className="space-y-0.5">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-600">
+                    {list.name}
+                  </p>
+                  <ItemRow
+                    item={item}
+                    list={list}
+                    isSettling={false}
+                    isFresh={false}
+                    addedByInitials={initialsFor(item.created_by, members, memberEmails)}
+                    doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                    onToggleDone={toggleDone}
+                    onEdit={editItem}
+                    onDelete={deleteItem}
+                    onRequestMove={setMovingItem}
+                    onRequestService={setServicingItem}
+                    onPromote={promoteItem}
+                    onBumpEpisode={bumpItemEpisode}
+                    onRequestDue={setDuingItem}
+                    onSnooze={snoozeItem}
+                  />
+                </div>
+              );
+            })}
+            {searchHits.length === 0 && (
+              <p className="text-sm text-slate-400">Nothing matches that.</p>
+            )}
+          </div>
+        ) : loading ? (
           <p className="text-sm text-slate-400">Loading...</p>
         ) : lists.length === 0 ? (
           <p className="text-sm text-slate-400">
@@ -1349,6 +1634,49 @@ export default function Home() {
         A sheet is also the right shape on a phone, where a dropdown next to the
         last row would fall off the bottom of the screen.
       */}
+      {duingItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3"
+          onClick={() => setDuingItem(null)}
+        >
+          <div
+            role="dialog"
+            aria-label="When is this due"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl"
+          >
+            <p className="px-1 pb-2 text-xs uppercase tracking-wider text-slate-500">
+              When is &ldquo;{duingItem.text}&rdquo; due?
+            </p>
+            <div className="space-y-1">
+              {[
+                { label: "Today", value: localDateKey() },
+                { label: "Tomorrow", value: addDays(1) },
+                { label: "This week", value: addDays(7) },
+                { label: "No particular day", value: null },
+              ].map((choice) => (
+                <button
+                  key={choice.label}
+                  onClick={() => {
+                    void setDue(duingItem, choice.value);
+                    setDuingItem(null);
+                  }}
+                  className="block w-full rounded-lg px-3 py-2.5 text-left text-sm text-slate-200 hover:bg-blue-500/20 hover:text-blue-100"
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setDuingItem(null)}
+              className="mt-2 w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {movingItem && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3"

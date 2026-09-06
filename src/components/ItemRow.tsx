@@ -1,9 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { Check, MoveRight, Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { CalendarDays, Check, Clock, MoveRight, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import type { Item, List } from "@/lib/types";
-import { formatTimestamp, possessive } from "@/lib/display";
+import { dueBucket, formatTimestamp, possessive } from "@/lib/display";
+
+/** "Today", "Tomorrow", or a short date — never a full timestamp. */
+function formatDue(due: string) {
+  const [year, month, day] = due.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const bucket = dueBucket(due);
+  if (bucket === "Today") return "today";
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (date.toDateString() === tomorrow.toDateString()) return "tomorrow";
+  return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
 
 type Props = {
   item: Item;
@@ -19,6 +31,8 @@ type Props = {
   onRequestService: (item: Item) => void;
   onPromote: (item: Item) => void;
   onBumpEpisode: (item: Item) => void;
+  onRequestDue: (item: Item) => void;
+  onSnooze: (item: Item) => void;
 };
 
 /**
@@ -40,6 +54,8 @@ export default function ItemRow({
   onRequestService,
   onPromote,
   onBumpEpisode,
+  onRequestDue,
+  onSnooze,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
@@ -145,6 +161,17 @@ export default function ItemRow({
               {item.progress && <span className="text-blue-300">{item.progress}</span>}
               {item.profile && <span>{possessive(item.profile)} profile</span>}
               {item.suggested_by && <span>from {item.suggested_by}</span>}
+              {item.due_on && (
+                <span
+                  className={
+                    dueBucket(item.due_on) === "Today"
+                      ? "rounded border border-amber-500/45 bg-amber-500/10 px-1.5 text-[10px] text-amber-200"
+                      : "rounded border border-slate-700 bg-slate-500/10 px-1.5 text-[10px] text-slate-300"
+                  }
+                >
+                  {formatDue(item.due_on)}
+                </span>
+              )}
               {!isWatch && <span>{formatTimestamp(item.created_at)}</span>}
               {isShared && addedByInitials && (
                 <span
@@ -183,6 +210,26 @@ export default function ItemRow({
               className="shrink-0 text-slate-500 hover:text-blue-400"
             >
               <Plus className="h-4 w-4" />
+            </button>
+          )}
+          {!isWatch && !item.done && (
+            <button
+              onClick={() => onRequestDue(item)}
+              aria-label="When is this due"
+              title="When is this due"
+              className="shrink-0 text-slate-500 hover:text-amber-300"
+            >
+              <CalendarDays className="h-4 w-4" />
+            </button>
+          )}
+          {!isWatch && !item.done && (
+            <button
+              onClick={() => onSnooze(item)}
+              aria-label="Snooze until tomorrow"
+              title="Snooze until tomorrow"
+              className="shrink-0 text-slate-500 hover:text-blue-400"
+            >
+              <Clock className="h-4 w-4" />
             </button>
           )}
           <button

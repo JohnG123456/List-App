@@ -29,6 +29,9 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
 
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
+  const [invites, setInvites] = useState<
+    { email: string; has_account: boolean; in_household: boolean }[]
+  >([]);
   const [newAllowedEmail, setNewAllowedEmail] = useState("");
   const [newMemberEmail, setNewMemberEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -68,11 +71,14 @@ export default function SettingsPage() {
       setLoading(false);
 
       if (me?.is_owner) {
-        const { data } = await supabase
-          .from("allowed_emails")
-          .select("id, email")
-          .order("created_at", { ascending: true });
-        if (!cancelled) setAllowedEmails(data ?? []);
+        const [allowed, status] = await Promise.all([
+          supabase.from("allowed_emails").select("id, email").order("created_at"),
+          supabase.rpc("household_invite_status"),
+        ]);
+        if (!cancelled) {
+          setAllowedEmails(allowed.data ?? []);
+          setInvites(status.data ?? []);
+        }
       }
     }
 
@@ -165,7 +171,11 @@ export default function SettingsPage() {
     setBusy(false);
 
     if (rpcError) {
-      setError(rpcError.message);
+      setError(
+        rpcError.message.includes("No account")
+          ? `${email} is allowed to sign up but hasn't created an account yet. They need to open the app and sign up first — being on the sign-up list isn't the same as having an account.`
+          : rpcError.message
+      );
       return;
     }
 
@@ -230,7 +240,13 @@ export default function SettingsPage() {
       .single();
 
     if (insertError) {
-      setError(insertError.message);
+      // 23505 is the unique index doing its job, which is not a failure worth
+      // showing someone a Postgres constraint name over.
+      setError(
+        insertError.code === "23505"
+          ? `${email} is already allowed to sign up.`
+          : insertError.message
+      );
       return;
     }
     setAllowedEmails((prev) => [...prev, data]);
@@ -354,8 +370,9 @@ export default function SettingsPage() {
             )}
             {isOwner && (
               <p className={caption}>
-                They need an account first, and their email on the sign-up list
-                below.
+                Two separate steps: the sign-up list below says who may create an
+                account, and this says who is in your household. Someone has to
+                actually sign up before they can be added here.
               </p>
             )}
           </div>
@@ -515,12 +532,33 @@ export default function SettingsPage() {
               </form>
 
               <div className="space-y-1">
-                {allowedEmails.map((entry) => (
+                {allowedEmails.map((entry) => {
+                  const status = invites.find(
+                    (i) => i.email.toLowerCase() === entry.email.toLowerCase()
+                  );
+                  return (
                   <div
                     key={entry.id}
-                    className="flex items-center justify-between rounded-lg bg-slate-800/40 px-3 py-2 text-sm text-slate-200"
+                    className="flex items-center justify-between gap-2 rounded-lg bg-slate-800/40 px-3 py-2 text-sm text-slate-200"
                   >
-                    {entry.email}
+                    <span className="min-w-0 flex-1 truncate">{entry.email}</span>
+                    {status && (
+                      <span
+                        className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${
+                          status.in_household
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                            : status.has_account
+                              ? "border-blue-500/40 bg-blue-500/10 text-blue-200"
+                              : "border-slate-600 text-slate-500"
+                        }`}
+                      >
+                        {status.in_household
+                          ? "in your household"
+                          : status.has_account
+                            ? "signed up, add them above"
+                            : "hasn't signed up yet"}
+                      </span>
+                    )}
                     <button
                       onClick={() => removeAllowedEmail(entry)}
                       aria-label={`Remove access for ${entry.email}`}
@@ -529,7 +567,8 @@ export default function SettingsPage() {
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

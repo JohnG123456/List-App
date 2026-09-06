@@ -50,8 +50,14 @@ const ROUTE_TOOL: Anthropic.Tool = {
             progress: { type: "string", description: "Season and episode, e.g. S1 E1. Empty if unknown." },
             profile: { type: "string", description: "Viewing profile, from the household's profiles. Empty if unknown." },
             suggested_by: { type: "string", description: "Who recommended it, if they said. Empty otherwise." },
+            due_on: {
+              type: "string",
+              description:
+                "The day it is due, as YYYY-MM-DD, when they said when. Empty " +
+                "when no day was mentioned — do not invent one.",
+            },
           },
-          required: ["text", "list_id", "qty", "aisle", "service", "progress", "profile", "suggested_by"],
+          required: ["text", "list_id", "qty", "aisle", "service", "progress", "profile", "suggested_by", "due_on"],
         },
       },
       updates: {
@@ -67,13 +73,19 @@ const ROUTE_TOOL: Anthropic.Tool = {
             service: { type: "string", description: "New service, or empty to leave alone." },
             progress: { type: "string", description: "New season and episode, or empty to leave alone." },
             profile: { type: "string", description: "New profile, or empty to leave alone." },
+            due_on: {
+              type: "string",
+              description:
+                "New due day as YYYY-MM-DD, or empty to leave alone. Use " +
+                "\"none\" to clear an existing one.",
+            },
             done: {
               type: "string",
               enum: ["done", "not_done", "unchanged"],
               description: "Whether this ticks the item off.",
             },
           },
-          required: ["item_id", "text", "qty", "service", "progress", "profile", "done"],
+          required: ["item_id", "text", "qty", "service", "progress", "profile", "due_on", "done"],
         },
       },
       answer: {
@@ -224,6 +236,9 @@ export async function POST(request: Request) {
     ),
     "",
     activeGroup ? `They are currently looking at the "${activeGroup}" pill.` : "",
+    `Today is ${new Date().toISOString().slice(0, 10)}. Fill in a due day only`,
+    "when they actually said when: today, tomorrow, Friday, before the weekend.",
+    "No day mentioned means no due day, rather than a guess.",
     "",
     "Ticking a single item off, switching list, and reading a list aloud are",
     "handled before this point, so anything arriving here needed more than a",
@@ -324,6 +339,7 @@ export async function POST(request: Request) {
         service: orNull(u.service),
         progress: orNull(u.progress),
         profile: orNull(u.profile),
+        due_on: u.due_on === "none" ? null : orNull(u.due_on),
         done: u.done === "done" ? true : u.done === "not_done" ? false : null,
       }));
 
@@ -351,6 +367,7 @@ export async function POST(request: Request) {
       progress: orNull(i.progress),
       profile: orNull(i.profile),
       suggested_by: orNull(i.suggested_by),
+      due_on: orNull(i.due_on),
     }));
 
   if (newItems.length === 0) {

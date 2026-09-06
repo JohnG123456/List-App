@@ -1,5 +1,5 @@
 export type ListKind = "general" | "shop" | "watch";
-export type GroupBy = "service" | "aisle" | null;
+export type GroupBy = "service" | "aisle" | "due" | null;
 
 export type List = {
   id: string;
@@ -39,6 +39,8 @@ export type Item = {
   suggested_by: string | null;
   hidden_until: string | null;
   archived_at: string | null;
+  /** When it should be done by. Drives the Today / This week grouping. */
+  due_on: string | null;
 };
 
 export type Household = {
@@ -77,6 +79,7 @@ export type NewItem = {
   progress: string | null;
   profile: string | null;
   suggested_by: string | null;
+  due_on: string | null;
 };
 
 export type ItemUpdate = {
@@ -86,6 +89,7 @@ export type ItemUpdate = {
   service: string | null;
   progress: string | null;
   profile: string | null;
+  due_on: string | null;
   done: boolean | null;
 };
 

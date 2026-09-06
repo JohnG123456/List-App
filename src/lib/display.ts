@@ -66,6 +66,33 @@ export function groupNames(lists: List[]) {
 
 export type ItemGroup = { heading: string | null; items: Item[] };
 
+/** Local date as YYYY-MM-DD, so "today" means today here, not in UTC. */
+export function localDateKey(date = new Date()) {
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+export function addDays(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return localDateKey(date);
+}
+
+/**
+ * Which bucket a due date falls in. Anything overdue joins today rather than
+ * getting its own section: it is still a thing to do now, and a list with a
+ * permanent "Overdue" heading is a list you stop reading.
+ */
+export function dueBucket(due: string | null, today = localDateKey()) {
+  if (!due) return "Whenever";
+  if (due <= today) return "Today";
+  if (due <= addDays(7)) return "This week";
+  return "Later";
+}
+
+const DUE_ORDER = ["Today", "This week", "Later", "Whenever"];
+
 /**
  * Arranges a list's items the way that list is configured to arrange them:
  * by streaming service, by supermarket aisle, or not at all. Anything with no
@@ -78,6 +105,23 @@ export function groupItems(
   household: Household | null
 ): ItemGroup[] {
   if (!list.group_by) return [{ heading: null, items }];
+
+  if (list.group_by === "due") {
+    const buckets = new Map<string, Item[]>();
+    for (const item of items) {
+      const key = dueBucket(item.due_on);
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(item);
+      else buckets.set(key, [item]);
+    }
+    return DUE_ORDER.filter((heading) => buckets.has(heading)).map((heading) => ({
+      // A list where everything is undated needs no headings at all.
+      heading: buckets.size === 1 && heading === "Whenever" ? null : heading,
+      items: buckets
+        .get(heading)!
+        .sort((a, b) => (a.due_on ?? "9999").localeCompare(b.due_on ?? "9999")),
+    }));
+  }
 
   const field = list.group_by === "service" ? "service" : "aisle";
   const unknownHeading =

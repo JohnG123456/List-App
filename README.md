@@ -15,6 +15,7 @@ Supabase so it's the same on every device.
    - `0003_households_and_lists.sql` — households, lists, and the move from one flat task list to many. **Take a database export before running this one**: it renames `tasks` to `items`, rewrites every security policy, and backfills existing rows. A free Supabase project has no point-in-time recovery to fall back on.
    - `0004_list_transitions.sql` — lets a list say where a promoted or ticked item goes, which is how "Start watching" and filing a finished show under Watched work without the app knowing anything about television.
    - `0005_household_management.sql` — the functions behind the settings screen. Adding someone needs a lookup in `auth.users`, which the browser can't see and shouldn't be able to, so it runs server-side with an ownership check.
+   - `0006_due_dates_and_invites.sql` — due dates on items, grouping a list by when things are due, and the function that shows who has actually signed up.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**, add `http://localhost:3000/auth/callback` (and your deployed URL's equivalent) to the redirect allow list — used for the password sign-up confirmation email.
@@ -162,3 +163,44 @@ is on a list, and falls through to be added when it isn't.
 
 Actions that send to another person, or that can't be undone, ask first. Clearing
 a shop is a reasonable thing to say out loud and a bad thing to get wrong.
+
+## Today versus the rest
+
+The to-do list groups by when things are due: **Today**, **This week**, **Later**,
+**Whenever**. Anything overdue joins today rather than getting an "Overdue"
+heading of its own, because it's still a thing to do now and a permanent red
+section is a section you stop reading.
+
+It's a date rather than a star on purpose. A star flagged "today" is still
+flagged tomorrow, and a list where everything is starred is a list where nothing
+is. A date sorts itself out as time passes.
+
+Set one with the calendar button, or just say it: "clean the car today", "book
+the car service before Friday". No day mentioned means no due day rather than a
+guess.
+
+**Snooze** (the clock button) hides something until 5am tomorrow. It's not done
+and not deleted, and the count sits at the bottom of the list with a way to wake
+it, so nothing quietly disappears.
+
+## Two lists of people
+
+These are different, and confusing them looks like a bug:
+
+- **Who can sign up** — email addresses permitted to create an account at all.
+- **Household** — people who have an account *and* share your lists.
+
+Being on the first doesn't create an account. Someone has to sign up themselves
+before they can be added to a household, so the sign-up list shows each address
+as "hasn't signed up yet", "signed up, add them above", or "in your household".
+
+## Live sync
+
+Ticking milk off in the aisle appears on the other phone without a refresh, over
+Supabase Realtime. It's included in the free plan and its limits are sized for
+far more than a household.
+
+The incoming row always wins: it's the database's version, and briefly losing
+your own optimistic edit beats the two of you seeing different lists. **This
+needs Realtime turned on for the `items` table** in the Supabase dashboard, under
+Database → Replication.
