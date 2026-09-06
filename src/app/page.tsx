@@ -1191,6 +1191,16 @@ export default function Home() {
             <span className="text-xs text-slate-500">
               {list.is_archive ? `${mine.length} titles` : `${open.length} open`}
             </span>
+            {list.is_archive && (
+              // Opening the archive was a one-way door: the only way back was
+              // to leave the screen and come back.
+              <button
+                onClick={() => setShowArchive(false)}
+                className="ml-auto text-xs text-slate-400 underline"
+              >
+                Hide
+              </button>
+            )}
           </div>
         )}
 
