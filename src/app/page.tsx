@@ -1682,8 +1682,12 @@ export default function Home() {
         ) : loading ? (
           <p className="text-sm text-slate-400">Loading...</p>
         ) : lists.length === 0 ? (
+          // Two very different reasons for an empty screen, and the wrong one
+          // told a new person to go and run SQL.
           <p className="text-sm text-slate-400">
-            No lists yet. Run the household migration in Supabase, then reload.
+            {household
+              ? "No lists yet. Add one in Settings, or just say something and one will be picked for it."
+              : "You're not in a household yet, so there's nothing to show. Ask whoever set this up to add your email under Household in their settings, then reload."}
           </p>
         ) : (
           <div className="space-y-3">
