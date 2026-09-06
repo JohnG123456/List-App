@@ -111,7 +111,18 @@ export default function LoginPage() {
     }
 
     const { error } = isSignUp
-      ? await supabase.auth.signUp({ email, password })
+      ? await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            // Without this, Supabase builds the confirmation link from the
+            // project's Site URL, which is whatever it was set to during
+            // local development. Sending it back to wherever they actually
+            // signed up from means the link works on production, on a preview
+            // deployment, and locally, with no setting to keep in step.
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
+        })
       : await supabase.auth.signInWithPassword({ email, password });
 
     setLoading(false);

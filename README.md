@@ -18,7 +18,9 @@ Supabase so it's the same on every device.
    - `0006_due_dates_and_invites.sql` — due dates on items, grouping a list by when things are due, and the function that shows who has actually signed up.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
-5. In **Authentication → URL Configuration**, add `http://localhost:3000/auth/callback` (and your deployed URL's equivalent) to the redirect allow list — used for the password sign-up confirmation email.
+5. In **Authentication → URL Configuration**:
+   - Set **Site URL** to your deployed URL, not `http://localhost:3000`. Supabase falls back to this when building links, so leaving it on localhost sends people a confirmation link their phone can't open.
+   - Add both `http://localhost:3000/auth/callback` and `https://<your-deployment>/auth/callback` to the redirect allow list. Sign-up asks to be sent back to whichever origin it was used from, and an origin that isn't on this list is ignored in favour of the Site URL.
 6. Copy the project URL and anon key from **Project Settings → API**.
 
 ### 2. Anthropic API key
