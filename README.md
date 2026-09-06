@@ -229,31 +229,29 @@ Database → Replication.
 
 ## The morning email
 
-At 6am Perth time each day, everyone in the household gets what's due today and
-a count of what else is waiting. Nothing due and nothing waiting means no email
-at all — a daily "nothing to report" is the fastest way to train someone to
-ignore the ones that matter.
+Built but not scheduled. **Send mine now** in Settings sends you what's due today
+and a count of what else is waiting, using your ordinary signed-in session with
+no elevated access. That works with just the Gmail variables already set.
 
-Setting it up needs two more environment variables in Vercel:
+To turn on the 6am automatic version, add a `vercel.json` with:
+
+```json
+{ "crons": [{ "path": "/api/morning", "schedule": "0 22 * * *" }] }
+```
+
+`0 22 * * *` is UTC, which is 6am in Perth. Vercel's free plan allows one run a
+day. It also needs two environment variables:
 
 - `CRON_SECRET` — any long random string. Vercel sends it as a bearer token on
   scheduled runs, and the route refuses anything without it, so it can't be
   triggered from outside.
-- `SUPABASE_SERVICE_ROLE_KEY` — from **Project Settings → API**, the `service_role`
-  key.
+- `SUPABASE_SERVICE_ROLE_KEY` — from **Project Settings → API**.
 
-**That second one deserves care.** It bypasses every row-level security policy in
-the database. It's needed because the scheduled run has no signed-in session and
-must read other people's lists to email them. Three things keep it contained: it's
-server-only and never reaches the browser (no `NEXT_PUBLIC_` prefix), the route
-refuses any request without the secret, and it only ever sends a person their own
-lists to the address on their own account — so even a successful call sends
-nothing anywhere new. The route re-applies the visibility rule by hand, since the
-policies that normally enforce it have been bypassed.
-
-The schedule in `vercel.json` is `0 22 * * *`, which is UTC. That's 6am in Perth
-(UTC+8). Change it if you move, and note Vercel's free plan allows one run a day.
-
-**Send mine now** in Settings sends the same email to yourself immediately, for
-testing. That one uses your ordinary signed-in session with no elevated access at
-all.
+**That second one deserves care**, which is why the schedule isn't committed. It
+bypasses every row-level security policy in the database. It's needed because a
+scheduled run has no signed-in session and must read other people's lists to
+email them. Three things keep it contained: it's server-only and never reaches
+the browser, the route refuses any request without the secret, and it only ever
+sends a person their own lists to the address on their own account. The route
+re-applies the private-list rule by hand, since the policies that normally
+enforce it have been bypassed — that's the line to watch if it's ever changed.
