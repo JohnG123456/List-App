@@ -40,6 +40,7 @@ export default function SettingsPage() {
   const [newListKind, setNewListKind] = useState<"todo" | "shop" | "plain">("todo");
   const [newListPrivate, setNewListPrivate] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [sendingDigest, setSendingDigest] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
 
@@ -311,6 +312,21 @@ export default function SettingsPage() {
       return;
     }
     setAllowedEmails((prev) => prev.filter((e) => e.id !== entry.id));
+  }
+
+  async function sendMorningNow() {
+    setSendingDigest(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/morning", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not send it");
+      flash(data.skipped ? data.message : "Sent to your inbox");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setSendingDigest(false);
+    }
   }
 
   async function signOut() {
@@ -685,6 +701,22 @@ export default function SettingsPage() {
           )}
 
           {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <div className={section}>
+            <p className={heading}>Morning email</p>
+            <p className={caption}>
+              At 6am each day, what&rsquo;s due today and how much else is
+              waiting. Nothing due and nothing waiting means no email, so a
+              quiet day stays quiet.
+            </p>
+            <button
+              onClick={sendMorningNow}
+              disabled={sendingDigest}
+              className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 disabled:opacity-50"
+            >
+              {sendingDigest ? "Sending..." : "Send mine now"}
+            </button>
+          </div>
 
           <div className={section}>
             <p className={heading}>Signed in as</p>

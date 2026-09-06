@@ -342,6 +342,14 @@ export default function Home() {
     [isWatchGroup, watchQuery, items, lists]
   );
 
+  // The initials you set in settings, falling back to the email only until
+  // you have set them.
+  const myInitials = useMemo(() => {
+    const me = members.find((m) => m.user_id === userId);
+    if (me?.initials) return me.initials.toUpperCase();
+    return userEmail ? initialsFromEmail(userEmail) : "?";
+  }, [members, userId, userEmail]);
+
   const memberEmails = useMemo(
     () => (userId && userEmail ? { [userId]: userEmail } : {}),
     [userId, userEmail]
@@ -1347,7 +1355,7 @@ export default function Home() {
             aria-label={userEmail ? `Signed in as ${userEmail}` : "Signed in"}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white shadow-md"
           >
-            {userEmail ? initialsFromEmail(userEmail) : "?"}
+            {myInitials}
           </span>
         </div>
       </div>

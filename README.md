@@ -226,3 +226,34 @@ The incoming row always wins: it's the database's version, and briefly losing
 your own optimistic edit beats the two of you seeing different lists. **This
 needs Realtime turned on for the `items` table** in the Supabase dashboard, under
 Database → Replication.
+
+## The morning email
+
+At 6am Perth time each day, everyone in the household gets what's due today and
+a count of what else is waiting. Nothing due and nothing waiting means no email
+at all — a daily "nothing to report" is the fastest way to train someone to
+ignore the ones that matter.
+
+Setting it up needs two more environment variables in Vercel:
+
+- `CRON_SECRET` — any long random string. Vercel sends it as a bearer token on
+  scheduled runs, and the route refuses anything without it, so it can't be
+  triggered from outside.
+- `SUPABASE_SERVICE_ROLE_KEY` — from **Project Settings → API**, the `service_role`
+  key.
+
+**That second one deserves care.** It bypasses every row-level security policy in
+the database. It's needed because the scheduled run has no signed-in session and
+must read other people's lists to email them. Three things keep it contained: it's
+server-only and never reaches the browser (no `NEXT_PUBLIC_` prefix), the route
+refuses any request without the secret, and it only ever sends a person their own
+lists to the address on their own account — so even a successful call sends
+nothing anywhere new. The route re-applies the visibility rule by hand, since the
+policies that normally enforce it have been bypassed.
+
+The schedule in `vercel.json` is `0 22 * * *`, which is UTC. That's 6am in Perth
+(UTC+8). Change it if you move, and note Vercel's free plan allows one run a day.
+
+**Send mine now** in Settings sends the same email to yourself immediately, for
+testing. That one uses your ordinary signed-in session with no elevated access at
+all.
