@@ -42,6 +42,7 @@ import {
 } from "@/lib/display";
 import { matchLocalCommand } from "@/lib/commands";
 import PillRail from "@/components/PillRail";
+import EditSheet from "@/components/EditSheet";
 import ItemRow from "@/components/ItemRow";
 
 // How long a ticked item stays in the open list, crossed out, before it moves
@@ -135,6 +136,7 @@ export default function Home() {
 
   const [movingItem, setMovingItem] = useState<Item | null>(null);
   const [duingItem, setDuingItem] = useState<Item | null>(null);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [pickerFor, setPickerFor] = useState<"read" | "email" | null>(null);
   const [pickedLists, setPickedLists] = useState<Set<string>>(new Set());
   const [globalQuery, setGlobalQuery] = useState("");
@@ -775,16 +777,18 @@ export default function Home() {
     }
   }
 
-  async function editItem(item: Item, text: string) {
+  async function editItem(item: Item, patch: Partial<Item>) {
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...patch } : i)));
+
     const { error: updateError } = await supabase
       .from("items")
-      .update({ text })
+      .update(patch)
       .eq("id", item.id);
+
     if (updateError) {
       setError(updateError.message);
-      return;
+      setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
     }
-    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, text } : i)));
   }
 
   async function deleteItem(item: Item) {
@@ -1226,7 +1230,7 @@ export default function Home() {
                   addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                   doneByInitials={initialsFor(item.done_by, members, memberEmails)}
                   onToggleDone={toggleDone}
-                  onEdit={editItem}
+                  onRequestEdit={setEditingItem}
                   onDelete={deleteItem}
                   onRequestMove={setMovingItem}
                   onRequestService={setServicingItem}
@@ -1317,7 +1321,7 @@ export default function Home() {
                 addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                 doneByInitials={initialsFor(item.done_by, members, memberEmails)}
                 onToggleDone={toggleDone}
-                onEdit={editItem}
+                onRequestEdit={setEditingItem}
                 onDelete={deleteItem}
                 onRequestMove={setMovingItem}
                 onRequestService={setServicingItem}
@@ -1659,7 +1663,7 @@ export default function Home() {
                     addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                     doneByInitials={initialsFor(item.done_by, members, memberEmails)}
                     onToggleDone={toggleDone}
-                    onEdit={editItem}
+                    onRequestEdit={setEditingItem}
                     onDelete={deleteItem}
                     onRequestMove={setMovingItem}
                     onRequestService={setServicingItem}
@@ -1697,6 +1701,21 @@ export default function Home() {
         A sheet is also the right shape on a phone, where a dropdown next to the
         last row would fall off the bottom of the screen.
       */}
+      {/* A row can arrive from the other phone before its list has loaded, so
+          the list is looked up rather than assumed. */}
+      {editingItem && listById(editingItem.list_id) && (
+        <EditSheet
+          item={editingItem}
+          list={listById(editingItem.list_id)!}
+          household={household}
+          onSave={(patch) => {
+            void editItem(editingItem, patch);
+            setEditingItem(null);
+          }}
+          onCancel={() => setEditingItem(null)}
+        />
+      )}
+
       {duingItem && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3"

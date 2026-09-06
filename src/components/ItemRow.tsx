@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { CalendarDays, Check, Clock, MoveRight, Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { CalendarDays, Check, Clock, MoveRight, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import type { Item, List } from "@/lib/types";
 import { dueBucket, formatTimestamp, possessive } from "@/lib/display";
 
@@ -25,7 +24,7 @@ type Props = {
   addedByInitials: string | null;
   doneByInitials: string | null;
   onToggleDone: (item: Item) => void;
-  onEdit: (item: Item, text: string) => void;
+  onRequestEdit: (item: Item) => void;
   onDelete: (item: Item) => void;
   onRequestMove: (item: Item) => void;
   onRequestService: (item: Item) => void;
@@ -48,7 +47,7 @@ export default function ItemRow({
   addedByInitials,
   doneByInitials,
   onToggleDone,
-  onEdit,
+  onRequestEdit,
   onDelete,
   onRequestMove,
   onRequestService,
@@ -57,17 +56,8 @@ export default function ItemRow({
   onRequestDue,
   onSnooze,
 }: Props) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(item.text);
-
   const isShared = list.private_to === null;
   const isWatch = list.kind === "watch";
-
-  function save() {
-    const text = draft.trim();
-    if (text && text !== item.text) onEdit(item, text);
-    setEditing(false);
-  }
 
   return (
     <div
@@ -93,44 +83,7 @@ export default function ItemRow({
         {item.done && <Check className="h-4 w-4 text-white" />}
       </button>
 
-      {editing ? (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            save();
-          }}
-          className="flex flex-1 items-center gap-2"
-        >
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setDraft(item.text);
-                setEditing(false);
-              }
-            }}
-            className="flex-1 rounded-lg border border-blue-500/50 bg-slate-800/60 px-2 py-1 text-sm text-slate-100 outline-none focus:border-blue-500"
-          />
-          <button type="submit" aria-label="Save" className="shrink-0 text-blue-400 hover:text-blue-300">
-            <Check className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(item.text);
-              setEditing(false);
-            }}
-            aria-label="Cancel edit"
-            className="shrink-0 text-slate-500 hover:text-red-400"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </form>
-      ) : (
-        <>
-          <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1">
             <p
               className={`text-sm leading-snug ${
                 item.done ? "text-slate-500 line-through" : "text-slate-100"
@@ -241,7 +194,7 @@ export default function ItemRow({
             <MoveRight className="h-4 w-4" />
           </button>
           <button
-            onClick={() => setEditing(true)}
+            onClick={() => onRequestEdit(item)}
             aria-label="Edit item"
             className="shrink-0 text-slate-500 hover:text-blue-400"
           >
@@ -254,9 +207,6 @@ export default function ItemRow({
           >
             <Trash2 className="h-4 w-4" />
           </button>
-        </>
-      )}
-
     </div>
   );
 }

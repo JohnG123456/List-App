@@ -188,6 +188,15 @@ the choice still means something in the Whenever section.
 and not deleted, and the count sits at the bottom of the list with a way to wake
 it, so nothing quietly disappears.
 
+## Editing an item
+
+The pencil opens a sheet with every field on it, and which fields appear comes
+from the list rather than from a per-list editor. A show has a service, an
+episode and a profile; a grocery item has a quantity and a section of the shop;
+a to-do has a due day. Services, profiles and sections are chosen from what the
+household has configured, so they can't drift into three spellings — and a value
+that has since been removed from settings is kept rather than silently blanked.
+
 ## Two lists of people
 
 These are different, and confusing them looks like a bug:
