@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronDown, ChevronUp, Shield, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { AllowedEmail, Household, List, Member } from "@/lib/types";
@@ -17,6 +18,7 @@ import ChipEditor from "@/components/ChipEditor";
  * nothing here you would want to fill in and then abandon.
  */
 export default function SettingsPage() {
+  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
   const [household, setHousehold] = useState<Household | null>(null);
@@ -309,6 +311,17 @@ export default function SettingsPage() {
       return;
     }
     setAllowedEmails((prev) => prev.filter((e) => e.id !== entry.id));
+  }
+
+  async function signOut() {
+    // Asks, because signing back in means waiting for an emailed code, and
+    // this used to happen on a mis-tap with no warning at all.
+    if (!window.confirm("Sign out? You'll need an emailed code to get back in.")) {
+      return;
+    }
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
   }
 
   const section =
@@ -672,6 +685,17 @@ export default function SettingsPage() {
           )}
 
           {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <div className={section}>
+            <p className={heading}>Signed in as</p>
+            <p className="text-sm text-slate-300">{userEmail ?? "Unknown"}</p>
+            <button
+              onClick={signOut}
+              className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+            >
+              Sign out
+            </button>
+          </div>
         </>
       )}
     </main>

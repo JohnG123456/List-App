@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ListChecks,
@@ -105,7 +104,6 @@ type Receipt = {
 };
 
 export default function Home() {
-  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
   const [lists, setLists] = useState<List[]>([]);
@@ -1149,12 +1147,6 @@ export default function Home() {
     }
   }
 
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
-
   // ------------------------------------------------------------------ render
 
   function renderList(list: List, withHeading: boolean) {
@@ -1350,13 +1342,13 @@ export default function Home() {
           >
             <Settings className="h-4 w-4" />
           </Link>
-          <button
-            onClick={handleSignOut}
-            title="Sign out"
+          <span
+            title={userEmail ?? "Signed in"}
+            aria-label={userEmail ? `Signed in as ${userEmail}` : "Signed in"}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white shadow-md"
           >
             {userEmail ? initialsFromEmail(userEmail) : "?"}
-          </button>
+          </span>
         </div>
       </div>
 
