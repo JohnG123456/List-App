@@ -1,4 +1,4 @@
-# Lists
+# Sorted
 
 Say anything and have Claude sort it into the right list. Groceries, to-dos and
 what you're watching all live in one app, shared with your household, synced via
@@ -28,7 +28,7 @@ Get a key from the [Anthropic Console](https://console.anthropic.com). It's only
 The "Email me" button sends the same Gmail account already used for SMTP login codes (see [How it works](#how-it-works)), but it needs its **own** app password — Google only shows an app password once, and the one already pasted into Supabase's SMTP settings can't be retrieved again. Generate a second one:
 
 1. Sign into that Gmail account → [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
-2. Name it something like "Lists app" and create it.
+2. Name it something like "Sorted" and create it.
 3. Copy the 16-character password (spaces don't matter, with or without them works).
 
 ### 4. Environment variables
@@ -161,3 +161,22 @@ is history it says so rather than adding nothing silently.
 the lists, and the sign-up allow-list. It's a separate screen because the main
 screen is for the lists: a panel opened twice a year shouldn't sit above them.
 Editing these from the UI is still to come; for now they're set in the database.
+
+## Voice commands
+
+The capture box takes four kinds of thing: items to add, a change to something
+already on a list, a question, or an action to run. Say "go" (or "that's it",
+"done", "send it") to stop dictating and send it.
+
+Three commands never reach the API at all. Ticking an item off, switching list,
+and reading a list aloud are matched in the browser first (`src/lib/commands.ts`),
+so they are instant, cost nothing, and — the point of the exercise — still work
+in a supermarket dead spot where a round trip would just hang.
+
+That matcher is deliberately a fast path rather than a parser. It only ticks
+when exactly one open item matches, and anything it isn't confident about
+returns nothing and goes to Claude. So "got the milk" ticks the milk when milk
+is on a list, and falls through to be added when it isn't.
+
+Actions that send to another person, or that can't be undone, ask first. Clearing
+a shop is a reasonable thing to say out loud and a bad thing to get wrong.

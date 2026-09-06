@@ -34,6 +34,7 @@ import {
   listsInGroup,
   watchVerdict,
 } from "@/lib/display";
+import { matchLocalCommand } from "@/lib/commands";
 import PillRail from "@/components/PillRail";
 import ItemRow from "@/components/ItemRow";
 
@@ -398,6 +399,33 @@ export default function Home() {
     const text = (textOverride ?? dictation).trim();
     if (!text) return;
 
+    // The handful of commands worth recognising here run without touching the
+    // network at all, which is what makes ticking things off work in a
+    // supermarket with one bar of signal — and instantly everywhere else.
+    const local = matchLocalCommand(text, { items, lists, groups });
+    if (local) {
+      setError(null);
+      setReceipt(null);
+      setAnswer(null);
+      setDictation("");
+      dictationRef.current = "";
+
+      if (local.type === "tick") {
+        setInfoMessage(`Ticked off ${local.item.text}.`);
+        await toggleDone(local.item);
+      } else if (local.type === "switch") {
+        setInfoMessage(null);
+        selectGroup(local.group);
+      } else {
+        const targets = local.group
+          ? listsInGroup(lists, local.group)
+          : visibleLists;
+        setInfoMessage(null);
+        readLists(targets);
+      }
+      return;
+    }
+
     setIsThinking(true);
     setError(null);
     setInfoMessage(null);
@@ -551,7 +579,7 @@ export default function Home() {
   }
 
   async function applyAction(action: {
-    type: "read_aloud" | "email" | "none";
+    type: "read_aloud" | "email" | "clear_bought" | "none";
     list_ids: string[];
     needs_confirmation: boolean;
   }) {
@@ -573,6 +601,15 @@ export default function Home() {
         return;
       }
       await emailLists(targets);
+      return;
+    }
+
+    if (action.type === "clear_bought") {
+      // Always asks, however confident the request sounded. Clearing a shop is
+      // a reasonable thing to say out loud and a terrible thing to get wrong.
+      for (const list of targets.filter((l) => l.auto_clear)) {
+        await clearBought(list);
+      }
       return;
     }
 
@@ -1093,7 +1130,7 @@ export default function Home() {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-5 p-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Lists</h1>
+        <h1 className="text-2xl font-bold text-white">Sorted</h1>
         <div className="flex items-center gap-2">
           <Link
             href="/settings"

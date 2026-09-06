@@ -136,7 +136,7 @@ export async function POST(request: Request) {
 
   try {
     await transporter.sendMail({
-      from: `"Lists" <${gmailAddress}>`,
+      from: `"Sorted" <${gmailAddress}>`,
       to: user.email,
       subject,
       text: textBody,

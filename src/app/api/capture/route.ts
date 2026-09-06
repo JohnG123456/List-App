@@ -87,8 +87,10 @@ const ROUTE_TOOL: Anthropic.Tool = {
       },
       action_type: {
         type: "string",
-        enum: ["read_aloud", "email", "none"],
-        description: "For intent 'do' only. 'none' for every other intent.",
+        enum: ["read_aloud", "email", "clear_bought", "none"],
+        description:
+          "For intent 'do' only. 'none' for every other intent. clear_bought " +
+          "files away the ticked items on a shopping list.",
       },
       action_list_ids: {
         type: "array",
@@ -120,7 +122,7 @@ type ToolInput = {
   items: Array<Record<string, string>>;
   updates: Array<Record<string, string>>;
   answer: string;
-  action_type: "read_aloud" | "email" | "none";
+  action_type: "read_aloud" | "email" | "clear_bought" | "none";
   action_list_ids: string[];
   needs_confirmation: boolean;
 };
@@ -222,6 +224,11 @@ export async function POST(request: Request) {
     ),
     "",
     activeGroup ? `They are currently looking at the "${activeGroup}" pill.` : "",
+    "",
+    "Ticking a single item off, switching list, and reading a list aloud are",
+    "handled before this point, so anything arriving here needed more than a",
+    "literal match. Set needs_confirmation on anything that sends to another",
+    "person or cannot be undone.",
     "",
     "Choose the intent carefully. A sentence naming a show and an episode number",
     "is almost always an update to that show, not a new item. A question is an",
