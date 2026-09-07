@@ -227,6 +227,17 @@ your own optimistic edit beats the two of you seeing different lists. **This
 needs Realtime turned on for the `items` table** in the Supabase dashboard, under
 Database → Replication.
 
+## Adding it to a phone's Home Screen
+
+In Safari, Share then **Add to Home Screen**. It opens as its own app with no
+address bar, because `src/app/manifest.ts` declares `display: standalone` and the
+layout sets the Apple web-app metadata. iOS needs both: the manifest covers newer
+versions, the meta tag covers the rest.
+
+Without those, iOS treats the icon as an ordinary bookmark and hands it back to
+Safari. If someone added it before this existed, the old icon keeps the old
+behaviour — they have to delete it and add it again.
+
 ## The morning email
 
 Built but not scheduled. **Send mine now** in Settings sends you what's due today
