@@ -15,6 +15,11 @@ create unique index if not exists allowed_emails_email_lower_idx
   on public.allowed_emails (lower(email));
 
 alter table public.allowed_emails enable row level security;
+-- Data API grants. Supabase stops granting these automatically on new
+-- tables from 30 Oct 2026, so each table states its own. anon
+-- (signed out) gets no table access; anything public goes through a
+-- view or function with its own grant. RLS still decides the rows.
+grant select, insert, update, delete on public.allowed_emails to authenticated, service_role;
 
 create policy "Admin can view allowlist"
   on public.allowed_emails for select

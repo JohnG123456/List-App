@@ -11,6 +11,11 @@ create index if not exists tasks_user_id_created_at_idx
   on public.tasks (user_id, created_at);
 
 alter table public.tasks enable row level security;
+-- Data API grants. Supabase stops granting these automatically on new
+-- tables from 30 Oct 2026, so each table states its own. anon
+-- (signed out) gets no table access; anything public goes through a
+-- view or function with its own grant. RLS still decides the rows.
+grant select, insert, update, delete on public.tasks to authenticated, service_role;
 
 -- Each user can only see and modify their own tasks.
 create policy "Users can select their own tasks"

@@ -230,8 +230,15 @@ grant execute on function public.is_household_owner() to authenticated;
 -- ---------------------------------------------------------------------------
 
 alter table public.households enable row level security;
+-- Data API grants. Supabase stops granting these automatically on new
+-- tables from 30 Oct 2026, so each table states its own. anon
+-- (signed out) gets no table access; anything public goes through a
+-- view or function with its own grant. RLS still decides the rows.
+grant select, insert, update, delete on public.households to authenticated, service_role;
 alter table public.household_members enable row level security;
+grant select, insert, update, delete on public.household_members to authenticated, service_role;
 alter table public.lists enable row level security;
+grant select, insert, update, delete on public.lists to authenticated, service_role;
 
 create policy "Members can see their household"
   on public.households for select
