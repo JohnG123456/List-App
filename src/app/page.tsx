@@ -29,6 +29,7 @@ import type {
 import type { SortDirection } from "@/lib/display";
 import {
   addDays,
+  bumpEpisode,
   groupItems,
   groupNames,
   initialsFor,
@@ -865,6 +866,23 @@ export default function Home() {
     if (target) setInfoMessage(`Moved to ${target.name}.`);
   }
 
+  async function bumpItemEpisode(item: Item) {
+    const progress = bumpEpisode(item.progress);
+    if (progress === item.progress) return;
+
+    setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, progress } : i)));
+
+    const { error: updateError } = await supabase
+      .from("items")
+      .update({ progress })
+      .eq("id", item.id);
+
+    if (updateError) {
+      setError(updateError.message);
+      setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
+    }
+  }
+
   async function setItemService(item: Item, service: string) {
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, service } : i)));
 
@@ -1219,6 +1237,7 @@ export default function Home() {
                   onRequestService={setServicingItem}
                   onPromote={promoteItem}
                   profileInitials={item.profile ? profileInitials(item.profile, members) : null}
+                  onBumpEpisode={bumpItemEpisode}
                   onRequestDue={setDuingItem}
                   onSnooze={snoozeItem}
                 />
@@ -1310,6 +1329,7 @@ export default function Home() {
                 onRequestService={setServicingItem}
                 onPromote={promoteItem}
                 profileInitials={item.profile ? profileInitials(item.profile, members) : null}
+                onBumpEpisode={bumpItemEpisode}
                 onRequestDue={setDuingItem}
                 onSnooze={snoozeItem}
               />
@@ -1652,6 +1672,7 @@ export default function Home() {
                     onRequestService={setServicingItem}
                     onPromote={promoteItem}
                     profileInitials={item.profile ? profileInitials(item.profile, members) : null}
+                    onBumpEpisode={bumpItemEpisode}
                     onRequestDue={setDuingItem}
                     onSnooze={snoozeItem}
                   />

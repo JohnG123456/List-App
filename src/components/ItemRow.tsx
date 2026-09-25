@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Check, Clock, MoveRight, Pencil, Play, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, Check, Clock, MoveRight, Pencil, Play, Plus, Trash2, UserRound } from "lucide-react";
 import type { Item, List } from "@/lib/types";
 import { dueBucket, formatTimestamp, possessive } from "@/lib/display";
 
@@ -30,6 +30,7 @@ type Props = {
   onRequestMove: (item: Item) => void;
   onRequestService: (item: Item) => void;
   onPromote: (item: Item) => void;
+  onBumpEpisode: (item: Item) => void;
   onRequestDue: (item: Item) => void;
   onSnooze: (item: Item) => void;
 };
@@ -53,6 +54,7 @@ export default function ItemRow({
   onRequestMove,
   onRequestService,
   onPromote,
+  onBumpEpisode,
   onRequestDue,
   onSnooze,
 }: Props) {
@@ -162,6 +164,16 @@ export default function ItemRow({
               className="shrink-0 text-slate-500 hover:text-emerald-400"
             >
               <Play className="h-4 w-4" />
+            </button>
+          )}
+          {isWatch && !list.is_archive && !list.promote_to && !item.done && (
+            <button
+              onClick={() => onBumpEpisode(item)}
+              aria-label="Next episode"
+              title="Next episode"
+              className="shrink-0 text-slate-500 hover:text-blue-400"
+            >
+              <Plus className="h-4 w-4" />
             </button>
           )}
           {!isWatch && !item.done && (

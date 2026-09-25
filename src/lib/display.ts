@@ -187,6 +187,21 @@ export function groupItems(
 }
 
 /**
+ * Bumps "S2 E4" to "S2 E5" for the one-tap case of finishing an episode.
+ * Anything it can't read confidently is left exactly as it was, since a wrong
+ * episode number is worse than an unchanged one.
+ */
+export function bumpEpisode(progress: string | null) {
+  if (!progress || !progress.trim()) return "S1 E1";
+
+  // The separator is captured so "Episode 3" doesn't come back as "Episode4".
+  const episode = progress.match(/^(.*[Ee])(\s*)(\d+)\s*$/);
+  if (episode) return `${episode[1]}${episode[2]}${Number(episode[3]) + 1}`;
+
+  return progress;
+}
+
+/**
  * Answers "have we watched this?" from the lists themselves, with no round
  * trip. The useful part of the answer is the service and whose profile it was
  * on, which is exactly what the streaming apps can't tell you.
