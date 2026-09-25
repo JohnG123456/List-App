@@ -200,10 +200,12 @@ export default function ItemRow({
           >
             <Pencil className="h-4 w-4" />
           </button>
+          {/* Divider + extra gap so Delete isn't hit when aiming for Edit */}
+          <span aria-hidden className="ml-2 h-5 w-px shrink-0 bg-slate-700" />
           <button
             onClick={() => onDelete(item)}
             aria-label="Delete item"
-            className="shrink-0 text-slate-500 hover:text-red-400"
+            className="-my-1.5 -mr-1.5 ml-1 shrink-0 p-1.5 text-slate-500 hover:text-red-400"
           >
             <Trash2 className="h-4 w-4" />
           </button>
