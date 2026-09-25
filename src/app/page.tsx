@@ -37,6 +37,7 @@ import {
   isSnoozed,
   listsInGroup,
   localDateKey,
+  profileInitials,
   watchVerdict,
 } from "@/lib/display";
 import { matchLocalCommand } from "@/lib/commands";
@@ -1235,6 +1236,7 @@ export default function Home() {
                   onRequestMove={setMovingItem}
                   onRequestService={setServicingItem}
                   onPromote={promoteItem}
+                  profileInitials={item.profile ? profileInitials(item.profile, members) : null}
                   onBumpEpisode={bumpItemEpisode}
                   onRequestDue={setDuingItem}
                   onSnooze={snoozeItem}
@@ -1326,6 +1328,7 @@ export default function Home() {
                 onRequestMove={setMovingItem}
                 onRequestService={setServicingItem}
                 onPromote={promoteItem}
+                profileInitials={item.profile ? profileInitials(item.profile, members) : null}
                 onBumpEpisode={bumpItemEpisode}
                 onRequestDue={setDuingItem}
                 onSnooze={snoozeItem}
@@ -1668,6 +1671,7 @@ export default function Home() {
                     onRequestMove={setMovingItem}
                     onRequestService={setServicingItem}
                     onPromote={promoteItem}
+                    profileInitials={item.profile ? profileInitials(item.profile, members) : null}
                     onBumpEpisode={bumpItemEpisode}
                     onRequestDue={setDuingItem}
                     onSnooze={snoozeItem}

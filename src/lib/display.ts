@@ -42,6 +42,22 @@ export function isSnoozed(item: Item, now = Date.now()) {
   return item.hidden_until !== null && new Date(item.hidden_until).getTime() > now;
 }
 
+/**
+ * A viewing profile shortened to fit a row: "Dawn" becomes the initials of the
+ * household member it matches (DG), "Dawn G" becomes DG, and a short shared
+ * name like "Ours" or "Kids" is left alone.
+ */
+export function profileInitials(profile: string, members: Member[]) {
+  const words = profile.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return words.map((w) => w[0]).join("").slice(0, 3).toUpperCase();
+  const name = words[0] ?? "";
+  const first = name[0]?.toUpperCase() ?? "";
+  const matches = members.filter((m) => m.initials?.toUpperCase().startsWith(first));
+  if (first && matches.length === 1) return matches[0].initials!.toUpperCase();
+  if (name.length <= 4) return name;
+  return first;
+}
+
 /** Items that count as "open" on a list: not done, not snoozed, not archived. */
 export function openItems(items: Item[], listId: string) {
   return items.filter(
@@ -160,6 +176,12 @@ export function groupItems(
     if (bi === -1) return -1;
     return ai - bi;
   });
+
+  // Watch rows already carry their service as a tag, so a heading above each
+  // one only repeated it. Shows stay ordered by service, just unlabelled.
+  if (list.group_by === "service") {
+    return [{ heading: null, items: headings.flatMap((heading) => buckets.get(heading)!) }];
+  }
 
   return headings.map((heading) => ({ heading, items: buckets.get(heading)! }));
 }
