@@ -1,6 +1,17 @@
 "use client";
 
-import { CalendarDays, Check, Clock, MoveRight, Pencil, Play, Plus, Trash2, UserRound } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  CalendarDays,
+  Check,
+  Clock,
+  MoveRight,
+  Pencil,
+  Play,
+  SkipForward,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import type { Item, List } from "@/lib/types";
 import { dueBucket, formatTimestamp, possessive } from "@/lib/display";
 
@@ -61,10 +72,21 @@ export default function ItemRow({
   const isShared = list.private_to === null;
   const isWatch = list.kind === "watch";
 
+  // A next-episode tap only changes a few characters, so the row flashes to
+  // show it landed.
+  const [bumped, setBumped] = useState(false);
+  useEffect(() => {
+    if (!bumped) return;
+    const timer = setTimeout(() => setBumped(false), 700);
+    return () => clearTimeout(timer);
+  }, [bumped]);
+
   return (
     <div
       className={`relative flex items-center gap-2.5 rounded-xl border px-3 py-2 backdrop-blur transition ${
-        isFresh
+        bumped
+          ? "border-blue-400/80 bg-blue-900/30 shadow-[0_0_18px_-8px_rgba(96,165,250,0.8)]"
+          : isFresh
           ? "border-emerald-400/70 bg-emerald-900/25 shadow-[0_0_18px_-8px_rgba(52,211,153,0.7)]"
           : "border-slate-700/60 bg-slate-900/50"
       } ${isSettling ? "opacity-60" : "opacity-100"}`}
@@ -113,7 +135,15 @@ export default function ItemRow({
                   Where?
                 </button>
               )}
-              {item.progress && <span className="text-blue-300">{item.progress}</span>}
+              {item.progress && (
+                <span
+                  className={`rounded px-0.5 transition-colors ${
+                    bumped ? "bg-blue-500/40 text-white" : "text-blue-300"
+                  }`}
+                >
+                  {item.progress}
+                </span>
+              )}
               {item.profile && (
                 <span
                   title={`${possessive(item.profile)} profile`}
@@ -137,7 +167,7 @@ export default function ItemRow({
                 </span>
               )}
               {!isWatch && <span>{formatTimestamp(item.created_at)}</span>}
-              {isShared && addedByInitials && (
+              {isShared && !isWatch && addedByInitials && (
                 <span
                   title="Added by"
                   className="rounded-full border border-slate-600 bg-slate-500/10 px-1.5 text-[10px]"
@@ -168,12 +198,15 @@ export default function ItemRow({
           )}
           {isWatch && !list.is_archive && !list.promote_to && !item.done && (
             <button
-              onClick={() => onBumpEpisode(item)}
+              onClick={() => {
+                onBumpEpisode(item);
+                setBumped(true);
+              }}
               aria-label="Next episode"
               title="Next episode"
               className="shrink-0 text-slate-500 hover:text-blue-400"
             >
-              <Plus className="h-4 w-4" />
+              <SkipForward className="h-4 w-4" />
             </button>
           )}
           {!isWatch && !item.done && (
