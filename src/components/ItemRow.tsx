@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Check, Clock, MoveRight, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { CalendarDays, Check, Clock, MoveRight, Pencil, Play, Trash2, UserRound } from "lucide-react";
 import type { Item, List } from "@/lib/types";
 import { dueBucket, formatTimestamp, possessive } from "@/lib/display";
 
@@ -22,6 +22,7 @@ type Props = {
   isSettling: boolean;
   isFresh: boolean;
   addedByInitials: string | null;
+  profileInitials: string | null;
   doneByInitials: string | null;
   onToggleDone: (item: Item) => void;
   onRequestEdit: (item: Item) => void;
@@ -29,7 +30,6 @@ type Props = {
   onRequestMove: (item: Item) => void;
   onRequestService: (item: Item) => void;
   onPromote: (item: Item) => void;
-  onBumpEpisode: (item: Item) => void;
   onRequestDue: (item: Item) => void;
   onSnooze: (item: Item) => void;
 };
@@ -45,6 +45,7 @@ export default function ItemRow({
   isSettling,
   isFresh,
   addedByInitials,
+  profileInitials,
   doneByInitials,
   onToggleDone,
   onRequestEdit,
@@ -52,7 +53,6 @@ export default function ItemRow({
   onRequestMove,
   onRequestService,
   onPromote,
-  onBumpEpisode,
   onRequestDue,
   onSnooze,
 }: Props) {
@@ -112,7 +112,16 @@ export default function ItemRow({
                 </button>
               )}
               {item.progress && <span className="text-blue-300">{item.progress}</span>}
-              {item.profile && <span>{possessive(item.profile)} profile</span>}
+              {item.profile && (
+                <span
+                  title={`${possessive(item.profile)} profile`}
+                  aria-label={`${possessive(item.profile)} profile`}
+                  className="flex items-center gap-0.5 text-slate-400"
+                >
+                  <UserRound className="h-3 w-3" />
+                  {profileInitials ?? item.profile}
+                </span>
+              )}
               {item.suggested_by && <span>from {item.suggested_by}</span>}
               {item.due_on && (
                 <span
@@ -153,16 +162,6 @@ export default function ItemRow({
               className="shrink-0 text-slate-500 hover:text-emerald-400"
             >
               <Play className="h-4 w-4" />
-            </button>
-          )}
-          {isWatch && !list.is_archive && !list.promote_to && !item.done && (
-            <button
-              onClick={() => onBumpEpisode(item)}
-              aria-label="Next episode"
-              title="Next episode"
-              className="shrink-0 text-slate-500 hover:text-blue-400"
-            >
-              <Plus className="h-4 w-4" />
             </button>
           )}
           {!isWatch && !item.done && (
