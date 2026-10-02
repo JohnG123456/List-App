@@ -25,7 +25,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Supabase is not configured" }, { status: 500 });
   }
 
-  const response = await fetch(`${supabaseUrl}/rest/v1/lists?select=*&limit=1`, {
+  // Resolved against the project URL rather than appended to it, so a trailing
+  // slash or path in NEXT_PUBLIC_SUPABASE_URL can't break the request.
+  const response = await fetch(new URL("/rest/v1/lists?select=*&limit=1", supabaseUrl), {
     headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
     cache: "no-store",
   });
