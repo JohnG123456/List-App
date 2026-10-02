@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Supabase is not configured" }, { status: 500 });
   }
 
-  const response = await fetch(`${supabaseUrl}/rest/v1/tasks?select=*&limit=1`, {
+  const response = await fetch(`${supabaseUrl}/rest/v1/lists?select=*&limit=1`, {
     headers: { apikey: supabaseKey, Authorization: `Bearer ${supabaseKey}` },
     cache: "no-store",
   });
