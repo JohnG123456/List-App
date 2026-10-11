@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
+import { models } from "@/lib/models";
 
 /**
  * "What should we watch tonight?"
@@ -144,7 +145,7 @@ export async function POST(request: Request) {
   let message: Anthropic.Message;
   try {
     message = await anthropic.messages.create({
-      model: "claude-opus-5",
+      model: models.pick(),
       max_tokens: 16000,
       system,
       tools: [PICK_TOOL],

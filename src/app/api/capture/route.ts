@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
+import { models } from "@/lib/models";
 
 /**
  * One box, one microphone, four things it can mean.
@@ -262,7 +263,7 @@ export async function POST(request: Request) {
   let message: Anthropic.Message;
   try {
     message = await anthropic.messages.create({
-      model: "claude-opus-5",
+      model: models.capture(),
       // Reasoning is on by default and its tokens come out of this budget, so
       // a tight ceiling truncates the tool call rather than the prose. A
       // truncated arrival looked exactly like "it only found one item".
@@ -270,6 +271,10 @@ export async function POST(request: Request) {
       // This was set to low effort for latency and that was the wrong trade.
       // Low effort consolidates, and consolidating is precisely the failure
       // here: three unrelated things in one sentence came back as one item.
+      // On Haiku 5.5 the forced tool_choice below skips thinking, so the
+      // "work through the whole sentence" prompt is what guards against it.
+      // Opus 5.5 and Sonnet 5.5 reject a forced tool_choice outright; switch
+      // to { type: "auto" } before pointing CLAUDE_CAPTURE_MODEL at either.
       output_config: { effort: "high" },
       system,
       tools: [ROUTE_TOOL],

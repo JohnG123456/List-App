@@ -27,6 +27,8 @@ Supabase so it's the same on every device.
 
 Get a key from the [Anthropic Console](https://console.anthropic.com). It's only ever used server-side (in `src/app/api/capture/route.ts`) — never exposed to the browser.
 
+Models are set in `src/lib/models.ts` and can be overridden with env vars. Capture defaults to `claude-haiku-5-5` (`CLAUDE_CAPTURE_MODEL`); pick and photo reading default to `claude-opus-5` (`CLAUDE_MODEL`, or per route with `CLAUDE_PICK_MODEL` / `CLAUDE_READ_PHOTO_MODEL`).
+
 ### 3. Gmail app password for "Email me"
 
 The "Email me" button sends the same Gmail account already used for SMTP login codes (see [How it works](#how-it-works)), but it needs its **own** app password — Google only shows an app password once, and the one already pasted into Supabase's SMTP settings can't be retrieved again. Generate a second one:
