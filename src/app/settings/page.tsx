@@ -8,6 +8,26 @@ import { createClient } from "@/lib/supabase/client";
 import type { AllowedEmail, Household, List, Member } from "@/lib/types";
 import { initialsFromEmail } from "@/lib/display";
 import ChipEditor from "@/components/ChipEditor";
+import {
+  DEFAULT_MODELS,
+  MODEL_COLUMNS,
+  MODEL_OPTIONS,
+  type ModelFeature,
+} from "@/lib/models";
+
+const MODEL_FEATURES: { feature: ModelFeature; label: string; caption: string }[] = [
+  {
+    feature: "capture",
+    label: "Sorting into lists",
+    caption: "Runs on everything you say or type, so speed shows most here.",
+  },
+  { feature: "pick", label: "What to watch", caption: "Picks from your watchlist." },
+  { feature: "readPhoto", label: "Reading photos", caption: "Turns a photo of a list into items." },
+];
+
+function modelLabel(id: string) {
+  return MODEL_OPTIONS.find((option) => option.id === id)?.label ?? id;
+}
 
 /**
  * Everything you set once and then forget. It lives on its own screen because
@@ -489,6 +509,41 @@ export default function SettingsPage() {
               ordered
               onChange={(aisle_order) => saveHousehold({ aisle_order }, "Aisle order")}
             />
+          </div>
+
+          <div className={section}>
+            <p className={heading}>AI models</p>
+            <p className={caption}>
+              Which Claude model does each job, for everyone in the household.
+              Changes apply from the next thing you say.
+            </p>
+            {MODEL_FEATURES.map(({ feature, label, caption: note }) => {
+              const column = MODEL_COLUMNS[feature];
+              return (
+                <label key={feature} className="block space-y-1">
+                  <span className="flex items-center justify-between gap-2 text-sm text-slate-200">
+                    {label}
+                    <select
+                      value={household[column] ?? ""}
+                      onChange={(e) =>
+                        saveHousehold({ [column]: e.target.value || null }, label)
+                      }
+                      className="rounded-lg border border-slate-700 bg-slate-800/60 px-2 py-1 text-sm text-slate-100 outline-none focus:border-blue-500"
+                    >
+                      <option value="">
+                        Default ({modelLabel(DEFAULT_MODELS[feature])})
+                      </option>
+                      {MODEL_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label} &ndash; {option.note}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
+                  <span className={caption}>{note}</span>
+                </label>
+              );
+            })}
           </div>
 
           <div className={section}>

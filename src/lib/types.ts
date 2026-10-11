@@ -49,6 +49,10 @@ export type Household = {
   services: string[];
   profiles: string[];
   aisle_order: string[];
+  // Null until chosen in Settings; see src/lib/models.ts.
+  capture_model?: string | null;
+  pick_model?: string | null;
+  read_photo_model?: string | null;
 };
 
 export type Member = {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
-import { models } from "@/lib/models";
+import { modelFor } from "@/lib/models";
 
 /**
  * Reads a photographed list — the one on the fridge, a recipe page, a receipt —
@@ -54,12 +54,17 @@ export async function POST(request: Request) {
   }
 
   const data = Buffer.from(await photo.arrayBuffer()).toString("base64");
+  const { data: household } = await supabase
+    .from("households")
+    .select("*")
+    .limit(1)
+    .maybeSingle();
   const anthropic = new Anthropic({ apiKey });
 
   let message: Anthropic.Message;
   try {
     message = await anthropic.messages.create({
-      model: models.readPhoto(),
+      model: modelFor("readPhoto", household),
       max_tokens: 4000,
       messages: [
         {

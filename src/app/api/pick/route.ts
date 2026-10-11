@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
-import { models } from "@/lib/models";
+import { modelFor } from "@/lib/models";
 
 /**
  * "What should we watch tonight?"
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
   const [listsResult, householdResult] = await Promise.all([
     supabase.from("lists").select("id, name, kind, is_archive").eq("kind", "watch"),
-    supabase.from("households").select("services").limit(1).maybeSingle(),
+    supabase.from("households").select("*").limit(1).maybeSingle(),
   ]);
 
   if (listsResult.error) {
@@ -145,7 +145,7 @@ export async function POST(request: Request) {
   let message: Anthropic.Message;
   try {
     message = await anthropic.messages.create({
-      model: models.pick(),
+      model: modelFor("pick", householdResult.data),
       max_tokens: 16000,
       system,
       tools: [PICK_TOOL],

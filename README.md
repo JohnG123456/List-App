@@ -27,7 +27,7 @@ Supabase so it's the same on every device.
 
 Get a key from the [Anthropic Console](https://console.anthropic.com). It's only ever used server-side (in `src/app/api/capture/route.ts`) — never exposed to the browser.
 
-Models are set in `src/lib/models.ts` and can be overridden with env vars. Capture defaults to `claude-haiku-5-5` (`CLAUDE_CAPTURE_MODEL`); pick and photo reading default to `claude-opus-5` (`CLAUDE_MODEL`, or per route with `CLAUDE_PICK_MODEL` / `CLAUDE_READ_PHOTO_MODEL`).
+Which Claude model each AI feature uses is chosen per household under **Settings → AI models** (Haiku 5.5, Sonnet 5 or Opus 5). With nothing chosen, capture uses Haiku 5.5 and the rest use Opus 5; env vars (`CLAUDE_CAPTURE_MODEL`, `CLAUDE_PICK_MODEL`, `CLAUDE_READ_PHOTO_MODEL`, `CLAUDE_MODEL`) change those defaults. Opus 5.5 and Sonnet 5.5 aren't offered because they reject the forced tool calls capture and pick rely on. The allowlist lives in `src/lib/models.ts`; the choice is stored by migration `0007_ai_models.sql`.
 
 ### 3. Gmail app password for "Email me"
 
