@@ -262,10 +262,16 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .join("\n");
 
+  // Which model answered and how long it took travel back with every reply,
+  // so the receipt can say so while models are being compared.
+  const model = modelFor("capture", household);
+  const started = Date.now();
+  const viaNow = () => ({ model, ms: Date.now() - started });
+
   let message: Anthropic.Message;
   try {
     message = await anthropic.messages.create({
-      model: modelFor("capture", household),
+      model,
       // Reasoning is on by default and its tokens come out of this budget, so
       // a tight ceiling truncates the tool call rather than the prose. A
       // truncated arrival looked exactly like "it only found one item".
@@ -283,8 +289,15 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: `Claude call failed: ${detail}` }, { status: 502 });
+    return NextResponse.json(
+      { error: `Claude call failed: ${detail}`, via: viaNow() },
+      { status: 502 }
+    );
   }
+
+  const via = viaNow();
+  const reply = (body: Record<string, unknown>, init?: ResponseInit) =>
+    NextResponse.json({ ...body, via }, init);
 
   const toolUse = message.content.find(
     (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
@@ -294,14 +307,14 @@ export async function POST(request: Request) {
   // a confident short one. Say so instead of acting on half a sentence.
   if (message.stop_reason === "max_tokens") {
     console.error("[capture] hit max_tokens", { chars: text.length });
-    return NextResponse.json(
+    return reply(
       { error: "That was cut short before it finished. Try saying it again." },
       { status: 502 }
     );
   }
 
   if (!toolUse) {
-    return NextResponse.json(
+    return reply(
       { error: "Could not work out what that meant. Try rephrasing." },
       { status: 502 }
     );
@@ -315,16 +328,17 @@ export async function POST(request: Request) {
     items: input.items?.length ?? 0,
     updates: input.updates?.length ?? 0,
     stop: message.stop_reason,
+    ...via,
   });
   const validListIds = new Set(lists.map((l) => l.id));
   const validItemIds = new Set(items.map((i) => i.id));
 
   if (input.intent === "ask") {
-    return NextResponse.json({ intent: "ask", answer: input.answer });
+    return reply({ intent: "ask", answer: input.answer });
   }
 
   if (input.intent === "do") {
-    return NextResponse.json({
+    return reply({
       intent: "do",
       action: {
         type: input.action_type,
@@ -349,13 +363,13 @@ export async function POST(request: Request) {
       }));
 
     if (updates.length === 0) {
-      return NextResponse.json(
+      return reply(
         { error: "Could not tell which item that was about." },
         { status: 422 }
       );
     }
 
-    return NextResponse.json({ intent: "update", updates });
+    return reply({ intent: "update", updates });
   }
 
   // Anything reaching here is an add. A hallucinated list id would fail the
@@ -376,11 +390,11 @@ export async function POST(request: Request) {
     }));
 
   if (newItems.length === 0) {
-    return NextResponse.json(
+    return reply(
       { error: "Nothing to add was found in that." },
       { status: 422 }
     );
   }
 
-  return NextResponse.json({ intent: "add", items: newItems });
+  return reply({ intent: "add", items: newItems });
 }

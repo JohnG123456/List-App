@@ -12,6 +12,7 @@ import {
   DEFAULT_MODELS,
   MODEL_COLUMNS,
   MODEL_OPTIONS,
+  modelLabel,
   type ModelFeature,
 } from "@/lib/models";
 
@@ -24,10 +25,6 @@ const MODEL_FEATURES: { feature: ModelFeature; label: string; caption: string }[
   { feature: "pick", label: "What to watch", caption: "Picks from your watchlist." },
   { feature: "readPhoto", label: "Reading photos", caption: "Turns a photo of a list into items." },
 ];
-
-function modelLabel(id: string) {
-  return MODEL_OPTIONS.find((option) => option.id === id)?.label ?? id;
-}
 
 /**
  * Everything you set once and then forget. It lives on its own screen because

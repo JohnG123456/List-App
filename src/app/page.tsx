@@ -41,6 +41,7 @@ import {
   watchVerdict,
 } from "@/lib/display";
 import { matchLocalCommand } from "@/lib/commands";
+import { modelLabel } from "@/lib/models";
 import PillRail from "@/components/PillRail";
 import EditSheet from "@/components/EditSheet";
 import ItemRow from "@/components/ItemRow";
@@ -127,6 +128,9 @@ export default function Home() {
   const [isThinking, setIsThinking] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [answer, setAnswer] = useState<string | null>(null);
+  // Which model handled the last capture and how long it took, shown under the
+  // result while models are being compared in Settings.
+  const [via, setVia] = useState<{ model: string; ms: number } | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
@@ -495,6 +499,7 @@ export default function Home() {
       setError(null);
       setReceipt(null);
       setAnswer(null);
+      setVia(null);
       setDictation("");
       dictationRef.current = "";
 
@@ -519,6 +524,7 @@ export default function Home() {
     setInfoMessage(null);
     setReceipt(null);
     setAnswer(null);
+    setVia(null);
 
     try {
       const res = await fetch("/api/capture", {
@@ -527,6 +533,7 @@ export default function Home() {
         body: JSON.stringify({ text, activeGroup: activeGroupRef.current }),
       });
       const data = await res.json();
+      if (data.via) setVia(data.via);
       if (!res.ok) throw new Error(data.error ?? "Could not read that");
 
       if (data.intent === "ask") {
@@ -1471,6 +1478,12 @@ export default function Home() {
         <div className="rounded-xl border border-blue-500/40 bg-blue-950/30 px-3 py-2 text-sm text-blue-100">
           {answer}
         </div>
+      )}
+
+      {via && !isThinking && (
+        <p className="-mt-1 px-1 text-[11px] text-slate-500">
+          via {modelLabel(via.model)} &middot; {(via.ms / 1000).toFixed(1)}s
+        </p>
       )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}

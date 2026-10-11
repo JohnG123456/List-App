@@ -38,6 +38,11 @@ const ENV_VARS: Record<ModelFeature, string> = {
   readPhoto: "CLAUDE_READ_PHOTO_MODEL",
 };
 
+/** "Haiku 5.5" for "claude-haiku-5-5"; unknown ids come back as they are. */
+export function modelLabel(id: string) {
+  return MODEL_OPTIONS.find((option) => option.id === id)?.label ?? id;
+}
+
 function allowed(value: unknown): value is ModelId {
   return MODEL_OPTIONS.some((option) => option.id === value);
 }
