@@ -13,7 +13,7 @@ import {
   UserRound,
 } from "lucide-react";
 import type { Item, List } from "@/lib/types";
-import { dueBucket, formatTimestamp, possessive } from "@/lib/display";
+import { dueBucket, formatTimestamp, possessive, todayWeekday } from "@/lib/display";
 
 /** "Today", "Tomorrow", or a short date — never a full timestamp. */
 function formatDue(due: string) {
@@ -142,6 +142,20 @@ export default function ItemRow({
                   }`}
                 >
                   {item.progress}
+                </span>
+              )}
+              {isWatch && item.airs_on && !item.done && (
+                <span
+                  title={`New episodes come out on ${item.airs_on}s`}
+                  className={
+                    item.airs_on === todayWeekday()
+                      ? "rounded border border-amber-500/45 bg-amber-500/10 px-1.5 text-[10px] text-amber-200"
+                      : "rounded border border-slate-700 bg-slate-500/10 px-1.5 text-[10px] text-slate-300"
+                  }
+                >
+                  {item.airs_on === todayWeekday()
+                    ? "new ep today"
+                    : `new eps ${item.airs_on.slice(0, 3)}`}
                 </span>
               )}
               {item.profile && (

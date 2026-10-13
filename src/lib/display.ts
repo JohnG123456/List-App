@@ -107,6 +107,21 @@ export function dueBucket(due: string | null, today = localDateKey()) {
   return "Later";
 }
 
+export const WEEKDAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+/** Today's weekday name in local time, matching the values in WEEKDAYS. */
+export function todayWeekday(date = new Date()) {
+  return WEEKDAYS[(date.getDay() + 6) % 7];
+}
+
 const DUE_ORDER = ["Today", "This week", "Later", "Whenever"];
 
 /**

@@ -51,6 +51,13 @@ const ROUTE_TOOL: Anthropic.Tool = {
             progress: { type: "string", description: "Season and episode, e.g. S1 E1. Empty if unknown." },
             profile: { type: "string", description: "Viewing profile, from the household's profiles. Empty if unknown." },
             suggested_by: { type: "string", description: "Who recommended it, if they said. Empty otherwise." },
+            airs_on: {
+              type: "string",
+              enum: ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+              description:
+                "For a show, the weekday new episodes come out, only when they " +
+                "said it. Empty otherwise — do not look it up or guess.",
+            },
             due_on: {
               type: "string",
               description:
@@ -58,7 +65,7 @@ const ROUTE_TOOL: Anthropic.Tool = {
                 "when no day was mentioned — do not invent one.",
             },
           },
-          required: ["text", "list_id", "qty", "aisle", "service", "progress", "profile", "suggested_by", "due_on"],
+          required: ["text", "list_id", "qty", "aisle", "service", "progress", "profile", "suggested_by", "due_on", "airs_on"],
         },
       },
       updates: {
@@ -74,6 +81,13 @@ const ROUTE_TOOL: Anthropic.Tool = {
             service: { type: "string", description: "New service, or empty to leave alone." },
             progress: { type: "string", description: "New season and episode, or empty to leave alone." },
             profile: { type: "string", description: "New profile, or empty to leave alone." },
+            airs_on: {
+              type: "string",
+              enum: ["", "none", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+              description:
+                "New weekday that new episodes come out, or empty to leave " +
+                "alone. Use \"none\" to clear it, e.g. when the season has finished.",
+            },
             due_on: {
               type: "string",
               description:
@@ -86,7 +100,7 @@ const ROUTE_TOOL: Anthropic.Tool = {
               description: "Whether this ticks the item off.",
             },
           },
-          required: ["item_id", "text", "qty", "service", "progress", "profile", "due_on", "done"],
+          required: ["item_id", "text", "qty", "service", "progress", "profile", "due_on", "airs_on", "done"],
         },
       },
       answer: {
@@ -188,7 +202,8 @@ export async function POST(request: Request) {
       .maybeSingle(),
     supabase
       .from("items")
-      .select("id, list_id, text, done, service, progress, profile, qty")
+      // "*" so a database without migration 0008's airs_on still answers.
+      .select("*")
       .is("archived_at", null)
       .order("created_at", { ascending: false })
       .limit(ITEM_CONTEXT_LIMIT),
@@ -235,6 +250,7 @@ export async function POST(request: Request) {
       (i) =>
         `- ${i.id} | ${i.text} | list ${i.list_id}${i.service ? ` | ${i.service}` : ""}` +
         `${i.progress ? ` | ${i.progress}` : ""}${i.profile ? ` | ${i.profile}'s profile` : ""}` +
+        `${i.airs_on ? ` | new episodes ${i.airs_on}s` : ""}` +
         `${i.done ? " | finished" : ""}`
     ),
     "",
@@ -242,6 +258,10 @@ export async function POST(request: Request) {
     `Today is ${new Date().toISOString().slice(0, 10)}. Fill in a due day only`,
     "when they actually said when: today, tomorrow, Friday, before the weekend.",
     "No day mentioned means no due day, rather than a guess.",
+    "If they say which day a show's new episodes come out (\"new Severance",
+    "drops Fridays\"), set airs_on on that show. Never fill it in from what you",
+    "think you know about the show: schedules change and a wrong day is worse",
+    "than none.",
     "",
     "Ticking a single item off, switching list, and reading a list aloud are",
     "handled before this point, so anything arriving here needed more than a",
@@ -359,6 +379,9 @@ export async function POST(request: Request) {
         progress: orNull(u.progress),
         profile: orNull(u.profile),
         due_on: u.due_on === "none" ? null : orNull(u.due_on),
+        // Only present when it changes, so updates still apply on a database
+        // without migration 0008.
+        ...(u.airs_on ? { airs_on: u.airs_on === "none" ? null : u.airs_on } : {}),
         done: u.done === "done" ? true : u.done === "not_done" ? false : null,
       }));
 
@@ -387,6 +410,7 @@ export async function POST(request: Request) {
       profile: orNull(i.profile),
       suggested_by: orNull(i.suggested_by),
       due_on: orNull(i.due_on),
+      ...(orNull(i.airs_on) ? { airs_on: orNull(i.airs_on) } : {}),
     }));
 
   if (newItems.length === 0) {

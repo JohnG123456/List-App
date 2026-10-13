@@ -618,6 +618,7 @@ export default function Home() {
       if (update.service) patch.service = update.service;
       if (update.progress) patch.progress = update.progress;
       if (update.profile) patch.profile = update.profile;
+      if (update.airs_on !== undefined) patch.airs_on = update.airs_on;
       if (update.due_on !== undefined) patch.due_on = update.due_on;
       if (update.done !== null) {
         patch.done = update.done;
@@ -660,6 +661,9 @@ export default function Home() {
               service: original.service,
               progress: original.progress,
               profile: original.profile,
+              // Undefined until migration 0008 adds the column; sending it
+              // then would fail the whole undo.
+              ...(original.airs_on !== undefined ? { airs_on: original.airs_on } : {}),
               done: original.done,
               done_at: original.done_at,
               done_by: original.done_by,
