@@ -41,6 +41,8 @@ export type Item = {
   archived_at: string | null;
   /** When it should be done by. Drives the Today / This week grouping. */
   due_on: string | null;
+  /** Weekday new episodes come out, e.g. "Thursday". Shows only. */
+  airs_on?: string | null;
 };
 
 export type Household = {
@@ -84,6 +86,7 @@ export type NewItem = {
   profile: string | null;
   suggested_by: string | null;
   due_on: string | null;
+  airs_on?: string | null;
 };
 
 export type ItemUpdate = {
@@ -94,6 +97,7 @@ export type ItemUpdate = {
   progress: string | null;
   profile: string | null;
   due_on: string | null;
+  airs_on?: string | null;
   done: boolean | null;
 };
 

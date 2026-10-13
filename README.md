@@ -16,6 +16,7 @@ Supabase so it's the same on every device.
    - `0004_list_transitions.sql` — lets a list say where a promoted or ticked item goes, which is how "Start watching" and filing a finished show under Watched work without the app knowing anything about television.
    - `0005_household_management.sql` — the functions behind the settings screen. Adding someone needs a lookup in `auth.users`, which the browser can't see and shouldn't be able to, so it runs server-side with an ownership check.
    - `0006_due_dates_and_invites.sql` — due dates on items, grouping a list by when things are due, and the function that shows who has actually signed up.
+   - `0008_airs_on.sql` — the weekday a show's new episodes come out, shown on the TV lists.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**:
@@ -109,6 +110,13 @@ points at Watching now, which is what the play button follows; `done_to` on
 Watching now points at Watched, which is where a ticked show files itself.
 Un-ticking walks it back. Any other pair of lists gets the same behaviour by
 filling in those two columns.
+
+**New episodes on** is the weekday a show still airing drops a new episode, set
+in the edit sheet or by saying it ("new Severance comes out Fridays"). The row
+shows it as a small tag, highlighted on the day itself. It's a weekday rather
+than a date because a weekly show keeps the same day all season. Claude only
+records it when you say it, never from what it thinks it knows, since release
+days move and a confident wrong day is worse than none.
 
 **Have we watched this** searches all three sections in the browser, with no
 round trip, and answers with the service and whose profile it was on — the thing

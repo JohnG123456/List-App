@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Household, Item, List } from "@/lib/types";
-import { addDays, localDateKey } from "@/lib/display";
+import { WEEKDAYS, addDays, localDateKey } from "@/lib/display";
 
 type Props = {
   item: Item;
@@ -30,6 +30,7 @@ export default function EditSheet({ item, list, household, onSave, onCancel }: P
   const [qty, setQty] = useState(item.qty ?? "");
   const [aisle, setAisle] = useState(item.aisle ?? "");
   const [dueOn, setDueOn] = useState(item.due_on ?? "");
+  const [airsOn, setAirsOn] = useState(item.airs_on ?? "");
 
   const isWatch = list.kind === "watch";
   const isShop = list.kind === "shop";
@@ -49,6 +50,9 @@ export default function EditSheet({ item, list, household, onSave, onCancel }: P
       patch.service = orNull(service);
       patch.progress = orNull(progress);
       patch.profile = orNull(profile);
+      // Only sent when changed, so editing a show still works on a database
+      // that hasn't had migration 0008 yet.
+      if (orNull(airsOn) !== (item.airs_on ?? null)) patch.airs_on = orNull(airsOn);
     } else if (isShop) {
       patch.qty = orNull(qty);
       patch.aisle = orNull(aisle);
@@ -122,6 +126,25 @@ export default function EditSheet({ item, list, household, onSave, onCancel }: P
                 placeholder="S2 E4"
                 className={field}
               />
+            </div>
+
+            <div className="space-y-1">
+              <label className={label} htmlFor="edit-airs-on">
+                New episodes on
+              </label>
+              <select
+                id="edit-airs-on"
+                value={airsOn}
+                onChange={(e) => setAirsOn(e.target.value)}
+                className={field}
+              >
+                <option value="">Not airing / all out</option>
+                {WEEKDAYS.map((day) => (
+                  <option key={day} value={day}>
+                    {day}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-1">
