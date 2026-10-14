@@ -8,6 +8,7 @@ import {
   Mic,
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
+  CalendarSearch,
   Camera,
   Eraser,
   Repeat,
@@ -151,6 +152,7 @@ export default function Home() {
     { item_id: string; text: string; service: string | null; reason: string }[] | null
   >(null);
   const [isPicking, setIsPicking] = useState(false);
+  const [isFindingDays, setIsFindingDays] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -932,6 +934,56 @@ export default function Home() {
   }
 
   /**
+   * Looks up which weekday each show's new episodes come out. The server only
+   * reports what it found; the change goes through applyUpdate so it gets the
+   * same receipt and undo as anything said into the capture box.
+   */
+  async function findReleaseDays() {
+    setIsFindingDays(true);
+    setError(null);
+    setInfoMessage(null);
+
+    try {
+      const res = await fetch("/api/release-days", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not look those up");
+
+      const results: { item_id: string; text: string; airs_on: string }[] = data.results;
+      const updates: ItemUpdate[] = [];
+      for (const result of results) {
+        if (result.airs_on === "unknown") continue;
+        const airs_on = result.airs_on === "none" ? null : result.airs_on;
+        const current = items.find((i) => i.id === result.item_id);
+        if (!current || (current.airs_on ?? null) === airs_on) continue;
+        updates.push({
+          item_id: result.item_id,
+          text: null,
+          qty: null,
+          service: null,
+          progress: null,
+          profile: null,
+          due_on: current.due_on,
+          airs_on,
+          done: null,
+        });
+      }
+
+      const unsure = results.filter((r) => r.airs_on === "unknown").map((r) => r.text);
+      if (updates.length > 0) await applyUpdate(updates);
+      setInfoMessage(
+        (updates.length > 0
+          ? `Release days updated for ${updates.length} show${updates.length === 1 ? "" : "s"}.`
+          : "Release days are already up to date.") +
+          (unsure.length > 0 ? ` Couldn\u2019t confirm: ${unsure.join(", ")}.` : "")
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsFindingDays(false);
+    }
+  }
+
+  /**
    * A shopping list is a session, not a record. Without this, every week's shop
    * stacks up until you are scrolling past hundreds of ticked items to find
    * this week's. It archives rather than deletes, because that history is what
@@ -1624,14 +1676,26 @@ export default function Home() {
               </p>
             )}
 
-            <button
-              onClick={() => void pickSomething()}
-              disabled={isPicking}
-              className="flex items-center gap-2 rounded-full border border-blue-500/50 bg-blue-500/15 px-4 py-2 text-sm text-blue-100 disabled:opacity-40"
-            >
-              <Sparkles className="h-4 w-4" />
-              {isPicking ? "Having a think..." : "Pick something"}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => void pickSomething()}
+                disabled={isPicking}
+                className="flex items-center gap-2 rounded-full border border-blue-500/50 bg-blue-500/15 px-4 py-2 text-sm text-blue-100 disabled:opacity-40"
+              >
+                <Sparkles className="h-4 w-4" />
+                {isPicking ? "Having a think..." : "Pick something"}
+              </button>
+
+              <button
+                onClick={() => void findReleaseDays()}
+                disabled={isFindingDays}
+                title="Search the web for the day each show's new episodes come out"
+                className="flex items-center gap-2 rounded-full border border-slate-600 bg-slate-500/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40"
+              >
+                <CalendarSearch className="h-4 w-4" />
+                {isFindingDays ? "Checking schedules..." : "Find release days"}
+              </button>
+            </div>
 
             {picks?.map((pick) => (
               <div
