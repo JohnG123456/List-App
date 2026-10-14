@@ -43,6 +43,10 @@ export type Item = {
   due_on: string | null;
   /** Weekday new episodes come out, e.g. "Thursday". Shows only. */
   airs_on?: string | null;
+  /** Newest episode out, e.g. "S2 E5". Set by Find release days. */
+  latest_episode?: string | null;
+  /** The whole current season is out, rather than one a week. */
+  all_released?: boolean;
 };
 
 export type Household = {
@@ -98,6 +102,8 @@ export type ItemUpdate = {
   profile: string | null;
   due_on: string | null;
   airs_on?: string | null;
+  latest_episode?: string | null;
+  all_released?: boolean;
   done: boolean | null;
 };
 

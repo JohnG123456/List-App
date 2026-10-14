@@ -17,6 +17,7 @@ Supabase so it's the same on every device.
    - `0005_household_management.sql` — the functions behind the settings screen. Adding someone needs a lookup in `auth.users`, which the browser can't see and shouldn't be able to, so it runs server-side with an ownership check.
    - `0006_due_dates_and_invites.sql` — due dates on items, grouping a list by when things are due, and the function that shows who has actually signed up.
    - `0008_airs_on.sql` — the weekday a show's new episodes come out, shown on the TV lists.
+   - `0009_season_status.sql` — the newest episode out and whether the whole season is out, filled in by Find release days.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**:
@@ -118,10 +119,15 @@ than a date because a weekly show keeps the same day all season. When you say it
 capture records it; it never fills one in from what it thinks it knows.
 
 **Find release days** (`/api/release-days`) looks them up instead: Claude
-searches the web for each show on Watching now and Want to watch and records
-the day a new episode lands in Australia, which is often a day after the US.
-A show between seasons or released all at once loses its tag; anything it
-can't confirm is left alone and named, so a guess never lands as fact. It runs
+searches the web for each show on Watching now and Want to watch and records,
+as of today in Australia (often a day behind the US):
+
+- **new eps Thu** — a season releasing weekly, and the day the next one lands;
+- **all out** — every episode of the latest season is available to binge;
+- **latest S2 E5** — the newest episode released, beside where you're up to.
+
+Anything it can't confirm is left alone and named, so a guess never lands as
+fact, and an episode number it couldn't pin down keeps whatever was there. It runs
 on Haiku 5.5 to keep it cheap; set `CLAUDE_RELEASE_DAYS_MODEL` to
 `claude-opus-5-5` or `claude-sonnet-5-5` if its answers prove unreliable, and
 those get the newer web search that filters results before reading them. A
