@@ -122,8 +122,10 @@ searches the web for each show on Watching now and Want to watch and records
 the day a new episode lands in Australia, which is often a day after the US.
 A show between seasons or released all at once loses its tag; anything it
 can't confirm is left alone and named, so a guess never lands as fact. It runs
-on Opus 5.5 (`CLAUDE_RELEASE_DAYS_MODEL` overrides) and takes a minute or two
-for a full list. Each run costs roughly a web search per show plus the tokens
+on Haiku 5.5 to keep it cheap; set `CLAUDE_RELEASE_DAYS_MODEL` to
+`claude-opus-5-5` or `claude-sonnet-5-5` if its answers prove unreliable, and
+those get the newer web search that filters results before reading them. A
+full list takes a minute or two. Each run costs roughly a web search per show plus the tokens
 to read the results, so it's a button rather than something that runs on its
 own.
 

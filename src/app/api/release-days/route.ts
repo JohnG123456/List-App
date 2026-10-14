@@ -15,10 +15,15 @@ import { WEEKDAYS } from "@/lib/display";
 // A web search per show adds up; the default function limit cuts it short.
 export const maxDuration = 300;
 
-// Not on the Settings allowlist (src/lib/models.ts): that list exists for
-// routes that force a tool call, which this one doesn't. Searching the web
-// well needs a model that supports dynamic filtering, which Haiku doesn't.
-const MODEL = process.env.CLAUDE_RELEASE_DAYS_MODEL?.trim() || "claude-opus-5-5";
+// Haiku by default: this is a lookup, run on a button, and cheap matters.
+// CLAUDE_RELEASE_DAYS_MODEL switches to Opus or Sonnet if Haiku's answers
+// turn out to be shaky.
+const MODEL = process.env.CLAUDE_RELEASE_DAYS_MODEL?.trim() || "claude-haiku-5-5";
+
+// Haiku only has the basic web search, which reads results as they come, and
+// no server-side fallback. The larger models get the newer search that
+// filters results first, and a fallback model if a request is declined.
+const IS_HAIKU = MODEL.startsWith("claude-haiku");
 
 // Enough for a household's watchlist; past this the request gets slow.
 const MAX_SHOWS = 25;
@@ -167,14 +172,14 @@ export async function POST() {
       message = await anthropic.beta.messages.create({
         model: MODEL,
         max_tokens: 16000,
-        betas: ["server-side-fallback-2026-07-01"],
-        // If the request is ever declined, another model answers it instead.
-        fallbacks: "default",
+        ...(IS_HAIKU
+          ? {}
+          : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
         output_config: { effort: "medium" },
         system,
         tools: [
           {
-            type: "web_search_20260209",
+            type: IS_HAIKU ? "web_search_20250305" : "web_search_20260209",
             name: "web_search",
             max_uses: Math.min(shows.length * 2, 30),
             user_location: {
