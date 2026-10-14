@@ -16,8 +16,10 @@ import { modelFor } from "@/lib/models";
 // A web search per show adds up; the default function limit cuts it short.
 export const maxDuration = 300;
 
-// Enough for a household's watchlist; past this the request gets slow.
-const MAX_SHOWS = 25;
+// Shows per request. The app calls this repeatedly until nothing is due, and
+// saves each batch as it comes back, so a batch small enough to finish well
+// inside maxDuration on Opus means a timeout only ever loses one batch.
+const BATCH_SIZE = 5;
 
 const RECORD_TOOL: Anthropic.Beta.BetaTool = {
   name: "record_release_days",
@@ -92,7 +94,19 @@ type Finding = {
 
 const STATUSES = new Set(["weekly", "all_released", "not_out", "unknown"]);
 
-export async function POST() {
+export async function POST(request: Request) {
+  // Shows the app has already sent this run, so a show whose result couldn't
+  // be saved isn't asked about again in a loop.
+  let exclude = new Set<string>();
+  try {
+    const body = await request.json();
+    if (Array.isArray(body?.exclude)) {
+      exclude = new Set(body.exclude.filter((id: unknown) => typeof id === "string"));
+    }
+  } catch {
+    // No body is fine: nothing to exclude.
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -163,13 +177,14 @@ export async function POST() {
     text: string;
     service: string | null;
     progress: string | null;
-  }[] = allShows.filter((show) => isDue(show, now));
-  const upToDate = allShows.length - shows.length;
-  // Any past the cap stay due and are picked up next time.
-  shows.splice(MAX_SHOWS);
+  }[] = allShows.filter((show) => isDue(show, now) && !exclude.has(show.id));
+  const upToDate = allShows.length - shows.length - exclude.size;
+  // What's left after this batch, for the app to decide whether to ask again.
+  const remaining = Math.max(shows.length - BATCH_SIZE, 0);
+  shows.splice(BATCH_SIZE);
 
   if (shows.length === 0) {
-    return NextResponse.json({ results: [], upToDate });
+    return NextResponse.json({ results: [], upToDate, remaining: 0 });
   }
 
   const today = new Date().toLocaleDateString("en-AU", {
@@ -305,7 +320,7 @@ export async function POST() {
       };
     });
 
-  return NextResponse.json({ results, upToDate });
+  return NextResponse.json({ results, upToDate, remaining });
 }
 
 /** "s2e5", "S2 E5" and "Season 2 Episode 5" all become "S2 E5"; anything else is dropped. */

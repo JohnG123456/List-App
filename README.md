@@ -143,8 +143,11 @@ It runs on Opus 5.5 by default, which in testing confirmed far more shows
 than Haiku 5.5. **Settings → AI models → Release days** switches it to Sonnet
 5.5 or Haiku 5.5 to save cost; Haiku only has the basic web search, while
 Sonnet and Opus get the newer one that filters results before reading them. Those are offered here and not for the
-other features because this is the one route that doesn't force a tool call. A
-full list takes a minute or two. Each run costs roughly a web search per show plus the tokens
+other features because this is the one route that doesn't force a tool call. Shows are
+looked up five at a time, each batch saved as it comes back, with the button
+counting progress. If a batch fails or times out, everything before it stays
+saved and the message says how many are left; tapping again carries on with
+just those, since the finished ones are no longer due. Each run costs roughly a web search per show plus the tokens
 to read the results, so it's a button rather than something that runs on its
 own.
 
