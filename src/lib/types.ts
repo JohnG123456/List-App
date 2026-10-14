@@ -47,6 +47,8 @@ export type Item = {
   latest_episode?: string | null;
   /** The whole current season is out, rather than one a week. */
   all_released?: boolean;
+  /** When Find release days last looked this show up. */
+  release_checked_at?: string | null;
 };
 
 export type Household = {
@@ -105,6 +107,7 @@ export type ItemUpdate = {
   airs_on?: string | null;
   latest_episode?: string | null;
   all_released?: boolean;
+  release_checked_at?: string | null;
   done: boolean | null;
 };
 

@@ -134,24 +134,42 @@ export async function POST() {
     return NextResponse.json({ error: "No TV list to look up" }, { status: 409 });
   }
 
-  const { data: shows, error: itemsError } = await supabase
+  const { data: allShows, error: itemsError } = await supabase
     .from("items")
-    .select("id, text, service, progress")
+    // "*" so a database without migration 0010's release_checked_at still
+    // answers; every show then counts as never checked.
+    .select("*")
     .in("list_id", listIds)
     .eq("done", false)
     .is("archived_at", null)
-    .order("created_at", { ascending: false })
-    .limit(MAX_SHOWS);
+    .order("created_at", { ascending: false });
 
   if (itemsError) {
     return NextResponse.json({ error: itemsError.message }, { status: 500 });
   }
 
-  if (!shows || shows.length === 0) {
+  if (!allShows || allShows.length === 0) {
     return NextResponse.json(
       { error: "No shows on the list to look up yet." },
       { status: 409 }
     );
+  }
+
+  // Each search costs money, so a show is only looked up when its details
+  // could have changed since the last time.
+  const now = new Date();
+  const shows: {
+    id: string;
+    text: string;
+    service: string | null;
+    progress: string | null;
+  }[] = allShows.filter((show) => isDue(show, now));
+  const upToDate = allShows.length - shows.length;
+  // Any past the cap stay due and are picked up next time.
+  shows.splice(MAX_SHOWS);
+
+  if (shows.length === 0) {
+    return NextResponse.json({ results: [], upToDate });
   }
 
   const today = new Date().toLocaleDateString("en-AU", {
@@ -287,11 +305,56 @@ export async function POST() {
       };
     });
 
-  return NextResponse.json({ results });
+  return NextResponse.json({ results, upToDate });
 }
 
 /** "s2e5", "S2 E5" and "Season 2 Episode 5" all become "S2 E5"; anything else is dropped. */
 function normaliseEpisode(value: string) {
   const match = value.match(/s(?:eason)?\s*(\d+)\D*?e(?:p(?:isode)?)?\.?\s*(\d+)/i);
   return match ? `S${Number(match[1])} E${Number(match[2])}` : null;
+}
+
+/** A date as YYYY-MM-DD in Perth, so "a new day" means a new day there. */
+function perthDate(date: Date) {
+  return date.toLocaleDateString("en-CA", { timeZone: "Australia/Perth" });
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a show is worth searching for again.
+ *
+ * - Never checked, or checked before this existed: yes.
+ * - Releasing weekly: once its release day has come round since the check,
+ *   because that's when the latest episode moves on.
+ * - Whole season out: monthly, to catch a new season being announced.
+ * - Anything else (not out yet, couldn't confirm, details missing): weekly.
+ */
+function isDue(
+  show: {
+    release_checked_at?: string | null;
+    airs_on?: string | null;
+    all_released?: boolean;
+    latest_episode?: string | null;
+  },
+  now: Date
+) {
+  if (!show.release_checked_at) return true;
+  const checked = new Date(show.release_checked_at);
+  const age = now.getTime() - checked.getTime();
+
+  const day = show.airs_on ? WEEKDAYS.indexOf(show.airs_on) : -1;
+  if (day >= 0) {
+    // Walk back from today (Perth) to the most recent release day.
+    const today = new Date(`${perthDate(now)}T00:00:00Z`);
+    const todayIndex = (today.getUTCDay() + 6) % 7;
+    const back = (todayIndex - day + 7) % 7;
+    const lastRelease = new Date(today.getTime() - back * DAY_MS)
+      .toISOString()
+      .slice(0, 10);
+    return lastRelease > perthDate(checked);
+  }
+
+  if (show.all_released && show.latest_episode) return age > 30 * DAY_MS;
+  return age > 7 * DAY_MS;
 }

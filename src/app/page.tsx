@@ -623,6 +623,9 @@ export default function Home() {
       if (update.airs_on !== undefined) patch.airs_on = update.airs_on;
       if (update.latest_episode !== undefined) patch.latest_episode = update.latest_episode;
       if (update.all_released !== undefined) patch.all_released = update.all_released;
+      if (update.release_checked_at !== undefined) {
+        patch.release_checked_at = update.release_checked_at;
+      }
       if (update.due_on !== undefined) patch.due_on = update.due_on;
       if (update.done !== null) {
         patch.done = update.done;
@@ -674,6 +677,10 @@ export default function Home() {
                     latest_episode: original.latest_episode,
                     all_released: original.all_released,
                   }
+                : {}),
+              // Undoing a lookup makes the show due for another one.
+              ...(original.release_checked_at !== undefined
+                ? { release_checked_at: original.release_checked_at }
                 : {}),
               done: original.done,
               done_at: original.done_at,
@@ -966,11 +973,28 @@ export default function Home() {
         latest_episode: string | null;
         all_released: boolean;
       }[] = data.results;
+      const upToDate: number = data.upToDate ?? 0;
+
+      if (results.length === 0) {
+        setInfoMessage(
+          `Nothing to look up: all ${upToDate} show${upToDate === 1 ? " is" : "s are"} ` +
+            "up to date until their next release day."
+        );
+        return;
+      }
+
+      // Every show looked up is stamped, so it isn't searched again until its
+      // details could have changed. Undefined means migration 0010 isn't in
+      // yet, and sending the column would fail the whole save.
+      const checkedAt = new Date().toISOString();
+      const stamped: string[] = [];
 
       const updates: ItemUpdate[] = [];
       for (const result of results) {
         const current = items.find((i) => i.id === result.item_id);
         if (!current) continue;
+        const canStamp = current.release_checked_at !== undefined;
+        if (canStamp) stamped.push(current.id);
         // A missing service can be found even when the schedule can't.
         const service = !current.service && result.service ? result.service : null;
         if (result.status === "unknown" && !service) continue;
@@ -985,6 +1009,7 @@ export default function Home() {
           progress: null,
           profile: null,
           due_on: current.due_on,
+          ...(canStamp ? { release_checked_at: checkedAt } : {}),
           done: null,
         };
         if (result.status === "unknown") {
@@ -1018,11 +1043,32 @@ export default function Home() {
         .map((u) => `${results.find((r) => r.item_id === u.item_id)?.text} (${u.service})`);
 
       if (updates.length > 0) await applyUpdate(updates);
+
+      // Shows that were checked but needed no change still get their stamp,
+      // outside the undo: nothing about them changed to put back.
+      const updatedIds = new Set(updates.map((u) => u.item_id));
+      const unchanged = stamped.filter((id) => !updatedIds.has(id));
+      if (unchanged.length > 0) {
+        const { error: stampError } = await supabase
+          .from("items")
+          .update({ release_checked_at: checkedAt })
+          .in("id", unchanged);
+        if (!stampError) {
+          setItems((prev) =>
+            prev.map((i) =>
+              unchanged.includes(i.id) ? { ...i, release_checked_at: checkedAt } : i
+            )
+          );
+        }
+      }
+
       setInfoMessage(
         [
+          `Checked ${results.length} show${results.length === 1 ? "" : "s"}` +
+            (upToDate > 0 ? ` (${upToDate} already up to date).` : "."),
           updates.length > 0
-            ? `Updated ${updates.length} show${updates.length === 1 ? "" : "s"}.`
-            : "Everything was already up to date.",
+            ? `Updated ${updates.length}.`
+            : "Nothing had changed.",
           allOut.length > 0 ? `Whole season out: ${allOut.join(", ")}.` : "",
           foundService.length > 0 ? `Found where to watch: ${foundService.join(", ")}.` : "",
           unsure.length > 0 ? `Couldn\u2019t confirm: ${unsure.join(", ")}.` : "",

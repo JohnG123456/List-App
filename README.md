@@ -18,7 +18,7 @@ Supabase so it's the same on every device.
    - `0006_due_dates_and_invites.sql` — due dates on items, grouping a list by when things are due, and the function that shows who has actually signed up.
    - `0008_airs_on.sql` — the weekday a show's new episodes come out, shown on the TV lists.
    - `0009_season_status.sql` — the newest episode out and whether the whole season is out, filled in by Find release days.
-   - `0010_release_days_model.sql` — which Claude model Find release days uses, chosen in Settings.
+   - `0010_release_days_settings.sql` — which Claude model Find release days uses, and when each show was last looked up.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**:
@@ -131,6 +131,13 @@ Anything it can't confirm is left alone and named, so a guess never lands as
 fact, and an episode number it couldn't pin down keeps whatever was there. A show with no
 streaming service gets one filled in too, but only from the services the
 household has set up, and a service already set is never changed.
+
+Each search costs money, so a show is only looked up again when something
+could have changed: a weekly show once its release day has come round since
+the last check, a season that's all out once a month (to catch a new one),
+and anything unconfirmed or incomplete once a week. Never-checked shows are
+always looked up. A correction made by hand in the edit sheet sticks until
+the show is next due.
 
 It runs on Haiku 5.5 by default; **Settings → AI models → Release days**
 switches it to Sonnet 5.5 or Opus 5.5, which get the newer web search that
