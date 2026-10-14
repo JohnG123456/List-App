@@ -158,6 +158,22 @@ export default function ItemRow({
                     : `new eps ${item.airs_on.slice(0, 3)}`}
                 </span>
               )}
+              {isWatch && item.all_released && !item.done && (
+                <span
+                  title="Every episode of this season is out"
+                  className="rounded border border-emerald-500/45 bg-emerald-500/10 px-1.5 text-[10px] text-emerald-200"
+                >
+                  all out
+                </span>
+              )}
+              {isWatch && item.latest_episode && !item.done && (
+                <span
+                  title={`Newest episode released: ${item.latest_episode}`}
+                  className="text-[10px] text-slate-400"
+                >
+                  latest {item.latest_episode}
+                </span>
+              )}
               {item.profile && (
                 <span
                   title={`${possessive(item.profile)} profile`}

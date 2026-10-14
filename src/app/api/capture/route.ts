@@ -251,6 +251,8 @@ export async function POST(request: Request) {
         `- ${i.id} | ${i.text} | list ${i.list_id}${i.service ? ` | ${i.service}` : ""}` +
         `${i.progress ? ` | ${i.progress}` : ""}${i.profile ? ` | ${i.profile}'s profile` : ""}` +
         `${i.airs_on ? ` | new episodes ${i.airs_on}s` : ""}` +
+        `${i.latest_episode ? ` | latest episode out ${i.latest_episode}` : ""}` +
+        `${i.all_released ? " | whole season out" : ""}` +
         `${i.done ? " | finished" : ""}`
     ),
     "",

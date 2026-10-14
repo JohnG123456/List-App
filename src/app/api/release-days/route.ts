@@ -30,7 +30,8 @@ const MAX_SHOWS = 25;
 
 const RECORD_TOOL: Anthropic.Beta.BetaTool = {
   name: "record_release_days",
-  description: "Record the weekday new episodes come out, once for every show asked about.",
+  description:
+    "Record where each show's current season is up to, once for every show asked about.",
   strict: true,
   input_schema: {
     type: "object",
@@ -43,14 +44,29 @@ const RECORD_TOOL: Anthropic.Beta.BetaTool = {
           additionalProperties: false,
           properties: {
             item_id: { type: "string", description: "The id of the show, as given." },
+            status: {
+              type: "string",
+              enum: ["weekly", "all_released", "not_out", "unknown"],
+              description:
+                "weekly: a season is releasing an episode a week right now, or " +
+                "starts within the next few weeks. all_released: every episode " +
+                "of the latest season is out, whether it dropped at once or " +
+                "finished airing. not_out: a film, or nothing has been released " +
+                "yet. unknown: the search did not settle it.",
+            },
             airs_on: {
               type: "string",
-              enum: [...WEEKDAYS, "none", "unknown"],
+              enum: [...WEEKDAYS, ""],
               description:
-                "The weekday a new episode becomes available in Australia. " +
-                "\"none\" when nothing is releasing weekly right now: finished, " +
-                "between seasons, released all at once, or a film. \"unknown\" " +
-                "when the search did not settle it.",
+                "For weekly only, the weekday a new episode becomes available " +
+                "in Australia. Empty otherwise.",
+            },
+            latest_episode: {
+              type: "string",
+              description:
+                "The newest episode available in Australia today, as S<season> " +
+                "E<episode>, e.g. \"S2 E5\". For all_released, the season's last " +
+                "episode. Empty if none is out yet or you could not confirm it.",
             },
             note: {
               type: "string",
@@ -59,7 +75,7 @@ const RECORD_TOOL: Anthropic.Beta.BetaTool = {
                 "or \"Season 2 dropped all at once\".",
             },
           },
-          required: ["item_id", "airs_on", "note"],
+          required: ["item_id", "status", "airs_on", "latest_episode", "note"],
         },
       },
     },
@@ -67,7 +83,15 @@ const RECORD_TOOL: Anthropic.Beta.BetaTool = {
   },
 };
 
-type Finding = { item_id: string; airs_on: string; note: string };
+type Finding = {
+  item_id: string;
+  status: string;
+  airs_on: string;
+  latest_episode: string;
+  note: string;
+};
+
+const STATUSES = new Set(["weekly", "all_released", "not_out", "unknown"]);
 
 export async function POST() {
   const supabase = await createClient();
@@ -131,20 +155,23 @@ export async function POST() {
   });
 
   const system = [
-    "You find out which day of the week new episodes of TV shows come out, for",
+    "You find out where TV shows' current seasons are up to, for",
     "a household in Perth, Western Australia. Use web search; schedules change",
     "every season, so don't rely on memory.",
     "",
     `Today is ${today}.`,
     "",
-    "For each show, work out whether a season is releasing weekly right now or",
-    "starts within the next few weeks, and if so the weekday a new episode",
-    "becomes available in Australia on the service given. Australian streaming",
-    "releases often land a day after the US because of the time difference, so",
-    "prefer an Australian source or convert the US release time to Perth time.",
+    "For each show, work out on the service given and in Australia:",
+    "- whether a season is releasing weekly right now (or starts within the",
+    "  next few weeks), or every episode of the latest season is already out;",
+    "- if weekly, the weekday a new episode becomes available;",
+    "- the newest episode available today.",
+    "Australian streaming releases often land a day after the US because of the",
+    "time difference, so prefer an Australian source or convert the US release",
+    "time to Perth time, including for which episode is out as of today.",
     "",
-    "Answer \"none\" for anything not releasing weekly right now and \"unknown\"",
-    "when you can't confirm it. A wrong day is worse than no day.",
+    "Answer \"unknown\" when you can't confirm it, and leave latest_episode",
+    "empty rather than estimating it. A wrong answer is worse than none.",
     "",
     "When you have looked up every show, call record_release_days once with an",
     "entry for each of them.",
@@ -222,18 +249,30 @@ export async function POST() {
 
   const raw = (toolUse.input as { shows?: Finding[] }).shows ?? [];
   const byId = new Map(shows.map((s) => [s.id, s]));
-  const valid = new Set([...WEEKDAYS, "none", "unknown"]);
 
-  // Only answers about shows that were asked about, with a value the database
-  // accepts, get back to the app.
+  // Only answers about shows that were asked about, in a shape the database
+  // accepts, get back to the app. A weekday only means something for a show
+  // still releasing weekly, so it is dropped for anything else.
   const results = raw
-    .filter((r) => byId.has(r.item_id) && valid.has(r.airs_on))
-    .map((r) => ({
-      item_id: r.item_id,
-      text: byId.get(r.item_id)!.text,
-      airs_on: r.airs_on,
-      note: r.note,
-    }));
+    .filter((r) => byId.has(r.item_id) && STATUSES.has(r.status))
+    .map((r) => {
+      const weekly = r.status === "weekly" && WEEKDAYS.includes(r.airs_on);
+      return {
+        item_id: r.item_id,
+        text: byId.get(r.item_id)!.text,
+        status: r.status === "weekly" && !weekly ? "unknown" : r.status,
+        airs_on: weekly ? r.airs_on : null,
+        latest_episode: normaliseEpisode(r.latest_episode),
+        all_released: r.status === "all_released",
+        note: r.note,
+      };
+    });
 
   return NextResponse.json({ results });
+}
+
+/** "s2e5", "S2 E5" and "Season 2 Episode 5" all become "S2 E5"; anything else is dropped. */
+function normaliseEpisode(value: string) {
+  const match = value.match(/s(?:eason)?\s*(\d+)\D*?e(?:p(?:isode)?)?\.?\s*(\d+)/i);
+  return match ? `S${Number(match[1])} E${Number(match[2])}` : null;
 }

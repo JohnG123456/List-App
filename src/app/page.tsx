@@ -621,6 +621,8 @@ export default function Home() {
       if (update.progress) patch.progress = update.progress;
       if (update.profile) patch.profile = update.profile;
       if (update.airs_on !== undefined) patch.airs_on = update.airs_on;
+      if (update.latest_episode !== undefined) patch.latest_episode = update.latest_episode;
+      if (update.all_released !== undefined) patch.all_released = update.all_released;
       if (update.due_on !== undefined) patch.due_on = update.due_on;
       if (update.done !== null) {
         patch.done = update.done;
@@ -666,6 +668,13 @@ export default function Home() {
               // Undefined until migration 0008 adds the column; sending it
               // then would fail the whole undo.
               ...(original.airs_on !== undefined ? { airs_on: original.airs_on } : {}),
+              // Same for migration 0009's columns.
+              ...(original.latest_episode !== undefined
+                ? {
+                    latest_episode: original.latest_episode,
+                    all_released: original.all_released,
+                  }
+                : {}),
               done: original.done,
               done_at: original.done_at,
               done_by: original.done_by,
@@ -948,14 +957,24 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not look those up");
 
-      const results: { item_id: string; text: string; airs_on: string }[] = data.results;
+      const results: {
+        item_id: string;
+        text: string;
+        status: "weekly" | "all_released" | "not_out" | "unknown";
+        airs_on: string | null;
+        latest_episode: string | null;
+        all_released: boolean;
+      }[] = data.results;
+
       const updates: ItemUpdate[] = [];
       for (const result of results) {
-        if (result.airs_on === "unknown") continue;
-        const airs_on = result.airs_on === "none" ? null : result.airs_on;
+        if (result.status === "unknown") continue;
         const current = items.find((i) => i.id === result.item_id);
-        if (!current || (current.airs_on ?? null) === airs_on) continue;
-        updates.push({
+        if (!current) continue;
+
+        // Only fields that actually change are sent. An episode it couldn't
+        // confirm keeps whatever was there rather than being blanked.
+        const update: ItemUpdate = {
           item_id: result.item_id,
           text: null,
           qty: null,
@@ -963,18 +982,41 @@ export default function Home() {
           progress: null,
           profile: null,
           due_on: current.due_on,
-          airs_on,
           done: null,
-        });
+        };
+        if ((current.airs_on ?? null) !== result.airs_on) update.airs_on = result.airs_on;
+        if ((current.all_released ?? false) !== result.all_released) {
+          update.all_released = result.all_released;
+        }
+        const latest = result.status === "not_out" ? null : result.latest_episode;
+        if ((latest || result.status === "not_out") && (current.latest_episode ?? null) !== latest) {
+          update.latest_episode = latest;
+        }
+        if (
+          update.airs_on !== undefined ||
+          update.all_released !== undefined ||
+          update.latest_episode !== undefined
+        ) {
+          updates.push(update);
+        }
       }
 
-      const unsure = results.filter((r) => r.airs_on === "unknown").map((r) => r.text);
+      const names = (status: string) =>
+        results.filter((r) => r.status === status).map((r) => r.text);
+      const allOut = names("all_released");
+      const unsure = names("unknown");
+
       if (updates.length > 0) await applyUpdate(updates);
       setInfoMessage(
-        (updates.length > 0
-          ? `Release days updated for ${updates.length} show${updates.length === 1 ? "" : "s"}.`
-          : "Release days are already up to date.") +
-          (unsure.length > 0 ? ` Couldn\u2019t confirm: ${unsure.join(", ")}.` : "")
+        [
+          updates.length > 0
+            ? `Updated ${updates.length} show${updates.length === 1 ? "" : "s"}.`
+            : "Everything was already up to date.",
+          allOut.length > 0 ? `Whole season out: ${allOut.join(", ")}.` : "",
+          unsure.length > 0 ? `Couldn\u2019t confirm: ${unsure.join(", ")}.` : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");

@@ -31,6 +31,8 @@ export default function EditSheet({ item, list, household, onSave, onCancel }: P
   const [aisle, setAisle] = useState(item.aisle ?? "");
   const [dueOn, setDueOn] = useState(item.due_on ?? "");
   const [airsOn, setAirsOn] = useState(item.airs_on ?? "");
+  const [latestEpisode, setLatestEpisode] = useState(item.latest_episode ?? "");
+  const [allReleased, setAllReleased] = useState(item.all_released ?? false);
 
   const isWatch = list.kind === "watch";
   const isShop = list.kind === "shop";
@@ -53,6 +55,11 @@ export default function EditSheet({ item, list, household, onSave, onCancel }: P
       // Only sent when changed, so editing a show still works on a database
       // that hasn't had migration 0008 yet.
       if (orNull(airsOn) !== (item.airs_on ?? null)) patch.airs_on = orNull(airsOn);
+      // Likewise for migration 0009's columns.
+      if (orNull(latestEpisode) !== (item.latest_episode ?? null)) {
+        patch.latest_episode = orNull(latestEpisode);
+      }
+      if (allReleased !== (item.all_released ?? false)) patch.all_released = allReleased;
     } else if (isShop) {
       patch.qty = orNull(qty);
       patch.aisle = orNull(aisle);
@@ -145,6 +152,28 @@ export default function EditSheet({ item, list, household, onSave, onCancel }: P
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className={label} htmlFor="edit-latest">
+                Latest episode out
+              </label>
+              <input
+                id="edit-latest"
+                value={latestEpisode}
+                onChange={(e) => setLatestEpisode(e.target.value)}
+                placeholder="S2 E5"
+                className={field}
+              />
+              <label className="flex items-center gap-2 pt-1 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={allReleased}
+                  onChange={(e) => setAllReleased(e.target.checked)}
+                  className="h-4 w-4 accent-emerald-500"
+                />
+                Whole season is out
+              </label>
             </div>
 
             <div className="space-y-1">
