@@ -6,6 +6,7 @@ import {
   Check,
   Clock,
   MoveRight,
+  Paperclip,
   Pencil,
   Play,
   SkipForward,
@@ -35,6 +36,7 @@ type Props = {
   addedByInitials: string | null;
   profileInitials: string | null;
   doneByInitials: string | null;
+  attachmentCount: number;
   onToggleDone: (item: Item) => void;
   onRequestEdit: (item: Item) => void;
   onDelete: (item: Item) => void;
@@ -59,6 +61,7 @@ export default function ItemRow({
   addedByInitials,
   profileInitials,
   doneByInitials,
+  attachmentCount,
   onToggleDone,
   onRequestEdit,
   onDelete,
@@ -185,6 +188,17 @@ export default function ItemRow({
                 </span>
               )}
               {item.suggested_by && <span>from {item.suggested_by}</span>}
+              {attachmentCount > 0 && (
+                <button
+                  onClick={() => onRequestEdit(item)}
+                  title={attachmentCount === 1 ? "1 attachment" : `${attachmentCount} attachments`}
+                  aria-label={attachmentCount === 1 ? "1 attachment" : `${attachmentCount} attachments`}
+                  className="flex items-center gap-0.5 text-slate-400 hover:text-blue-300"
+                >
+                  <Paperclip className="h-3 w-3" />
+                  {attachmentCount > 1 && attachmentCount}
+                </button>
+              )}
               {item.due_on && (
                 <span
                   className={

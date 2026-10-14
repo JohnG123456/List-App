@@ -25,3 +25,21 @@ export async function createClient() {
     }
   );
 }
+
+/**
+ * Whether the signed-in person belongs to a household. An account alone isn't
+ * enough to use the AI routes: each call costs money, and an account created
+ * outside the invite list (see migration 0011) belongs to no household.
+ */
+export async function isHouseholdMember(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string
+) {
+  const { data } = await supabase
+    .from("household_members")
+    .select("household_id")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+  return Boolean(data);
+}
