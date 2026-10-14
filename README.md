@@ -114,9 +114,18 @@ filling in those two columns.
 **New episodes on** is the weekday a show still airing drops a new episode, set
 in the edit sheet or by saying it ("new Severance comes out Fridays"). The row
 shows it as a small tag, highlighted on the day itself. It's a weekday rather
-than a date because a weekly show keeps the same day all season. Claude only
-records it when you say it, never from what it thinks it knows, since release
-days move and a confident wrong day is worse than none.
+than a date because a weekly show keeps the same day all season. When you say it,
+capture records it; it never fills one in from what it thinks it knows.
+
+**Find release days** (`/api/release-days`) looks them up instead: Claude
+searches the web for each show on Watching now and Want to watch and records
+the day a new episode lands in Australia, which is often a day after the US.
+A show between seasons or released all at once loses its tag; anything it
+can't confirm is left alone and named, so a guess never lands as fact. It runs
+on Opus 5.5 (`CLAUDE_RELEASE_DAYS_MODEL` overrides) and takes a minute or two
+for a full list. Each run costs roughly a web search per show plus the tokens
+to read the results, so it's a button rather than something that runs on its
+own.
 
 **Have we watched this** searches all three sections in the browser, with no
 round trip, and answers with the service and whose profile it was on — the thing
