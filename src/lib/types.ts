@@ -116,3 +116,14 @@ export type CaptureAction = {
   list_ids: string[];
   needs_confirmation: boolean;
 };
+
+/** What /api/release-days found out about one show. */
+export type ReleaseResult = {
+  item_id: string;
+  text: string;
+  status: "weekly" | "all_released" | "not_out" | "unknown";
+  airs_on: string | null;
+  service: string | null;
+  latest_episode: string | null;
+  all_released: boolean;
+};

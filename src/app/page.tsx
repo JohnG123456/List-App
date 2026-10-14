@@ -26,6 +26,7 @@ import type {
   List,
   Member,
   NewItem,
+  ReleaseResult,
 } from "@/lib/types";
 import type { SortDirection } from "@/lib/display";
 import {
@@ -153,6 +154,7 @@ export default function Home() {
   >(null);
   const [isPicking, setIsPicking] = useState(false);
   const [isFindingDays, setIsFindingDays] = useState(false);
+  const [findProgress, setFindProgress] = useState<string | null>(null);
   const [showArchive, setShowArchive] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -604,14 +606,22 @@ export default function Home() {
   }
 
   async function applyUpdate(updates: ItemUpdate[]) {
+    const before = await saveUpdates(updates);
+    if (before.size === 0) {
+      setError("Could not tell which item that was about.");
+      return;
+    }
+    showUpdateReceipt(before);
+  }
+
+  /** Saves each update, returning every changed item as it was before. */
+  async function saveUpdates(updates: ItemUpdate[]) {
     const before = new Map<string, Item>();
-    const changedNames: string[] = [];
 
     for (const update of updates) {
       const existing = items.find((i) => i.id === update.item_id);
       if (!existing) continue;
       before.set(existing.id, existing);
-      changedNames.push(existing.text);
 
       // Only fields Claude actually filled in are touched; the rest stay put.
       const patch: Partial<Item> = {};
@@ -647,16 +657,16 @@ export default function Home() {
       setFreshListIds((prev) => new Set(prev).add(existing.list_id));
     }
 
-    if (before.size === 0) {
-      setError("Could not tell which item that was about.");
-      return;
-    }
+    return before;
+  }
 
+  /** "Updated ..." with one undo that puts every item in `before` back. */
+  function showUpdateReceipt(before: Map<string, Item>) {
     const first = [...before.values()][0];
     const list = listById(first.list_id);
 
     setReceipt({
-      message: `Updated ${changedNames.join(", ")}`,
+      message: `Updated ${[...before.values()].map((i) => i.text).join(", ")}`,
       jumps: list ? [{ group: list.group_name, label: `Go to ${list.name}` }] : [],
       undo: async () => {
         for (const original of before.values()) {
@@ -956,26 +966,102 @@ export default function Home() {
    */
   async function findReleaseDays() {
     setIsFindingDays(true);
+    setFindProgress(null);
     setError(null);
     setInfoMessage(null);
 
+    // Every show that's due is looked up in batches, and each batch is saved
+    // as soon as it comes back. If one batch fails or times out, the ones
+    // before it stay saved and stamped, so the next tap carries on from there.
+    const attempted: string[] = [];
+    const before = new Map<string, Item>();
+    const allOut: string[] = [];
+    const unsure: string[] = [];
+    const foundService: string[] = [];
+    let checked = 0;
+    let total = 0;
+    let upToDate = 0;
+    let stoppedBy: string | null = null;
+
     try {
-      const res = await fetch("/api/release-days", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not look those up");
+      for (let batch = 0; batch < 50; batch++) {
+        let data: {
+          results: ReleaseResult[];
+          upToDate: number;
+          remaining: number;
+          error?: string;
+        };
+        try {
+          const res = await fetch("/api/release-days", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ exclude: attempted }),
+          });
+          // A timeout comes back as a 504 page rather than JSON.
+          data = await res.json().catch(() => ({ error: `It timed out (${res.status}).` }));
+          if (!res.ok) throw new Error(data.error ?? "Could not look those up.");
+        } catch (err) {
+          // The server's own messages end in "Try again.", which the message
+          // below already says.
+          const reason = (err instanceof Error ? err.message : "It stopped.")
+            .replace(/\s*Try again\.?$/i, "")
+            .replace(/\.$/, "");
+          if (batch === 0) {
+            throw new Error(`Couldn\u2019t check any shows: ${reason}. Tap Find release days to try again.`);
+          }
+          stoppedBy = reason;
+          break;
+        }
 
-      const results: {
-        item_id: string;
-        text: string;
-        status: "weekly" | "all_released" | "not_out" | "unknown";
-        airs_on: string | null;
-        service: string | null;
-        latest_episode: string | null;
-        all_released: boolean;
-      }[] = data.results;
-      const upToDate: number = data.upToDate ?? 0;
+        if (batch === 0) {
+          upToDate = data.upToDate ?? 0;
+          total = data.results.length + (data.remaining ?? 0);
+        }
+        if (data.results.length === 0) break;
 
-      if (results.length === 0) {
+        const { updates, stamped } = releaseUpdatesFor(data.results);
+        attempted.push(...data.results.map((r) => r.item_id));
+
+        const saved = await saveUpdates(updates);
+        for (const [id, item] of saved) before.set(id, item);
+
+        // Shows that were checked but needed no change still get their stamp,
+        // outside the undo: nothing about them changed to put back.
+        const updatedIds = new Set(updates.map((u) => u.item_id));
+        const unchanged = stamped.filter((id) => !updatedIds.has(id));
+        if (unchanged.length > 0) {
+          const checkedAt = new Date().toISOString();
+          const { error: stampError } = await supabase
+            .from("items")
+            .update({ release_checked_at: checkedAt })
+            .in("id", unchanged);
+          if (!stampError) {
+            setItems((prev) =>
+              prev.map((i) =>
+                unchanged.includes(i.id) ? { ...i, release_checked_at: checkedAt } : i
+              )
+            );
+          }
+        }
+
+        const named = (status: string) =>
+          data.results.filter((r) => r.status === status).map((r) => r.text);
+        allOut.push(...named("all_released"));
+        unsure.push(...named("unknown"));
+        foundService.push(
+          ...updates
+            .filter((u) => u.service)
+            .map((u) => `${data.results.find((r) => r.item_id === u.item_id)?.text} (${u.service})`)
+        );
+
+        checked += data.results.length;
+        setFindProgress(`Checked ${checked} of ${total}...`);
+        if (data.remaining === 0) break;
+      }
+
+      if (before.size > 0) showUpdateReceipt(before);
+
+      if (total === 0) {
         setInfoMessage(
           `Nothing to look up: all ${upToDate} show${upToDate === 1 ? " is" : "s are"} ` +
             "up to date until their next release day."
@@ -983,92 +1069,15 @@ export default function Home() {
         return;
       }
 
-      // Every show looked up is stamped, so it isn't searched again until its
-      // details could have changed. Undefined means migration 0010 isn't in
-      // yet, and sending the column would fail the whole save.
-      const checkedAt = new Date().toISOString();
-      const stamped: string[] = [];
-
-      const updates: ItemUpdate[] = [];
-      for (const result of results) {
-        const current = items.find((i) => i.id === result.item_id);
-        if (!current) continue;
-        const canStamp = current.release_checked_at !== undefined;
-        if (canStamp) stamped.push(current.id);
-        // A missing service can be found even when the schedule can't.
-        const service = !current.service && result.service ? result.service : null;
-        if (result.status === "unknown" && !service) continue;
-
-        // Only fields that actually change are sent. An episode it couldn't
-        // confirm keeps whatever was there rather than being blanked.
-        const update: ItemUpdate = {
-          item_id: result.item_id,
-          text: null,
-          qty: null,
-          service,
-          progress: null,
-          profile: null,
-          due_on: current.due_on,
-          ...(canStamp ? { release_checked_at: checkedAt } : {}),
-          done: null,
-        };
-        if (result.status === "unknown") {
-          updates.push(update);
-          continue;
-        }
-        if ((current.airs_on ?? null) !== result.airs_on) update.airs_on = result.airs_on;
-        if ((current.all_released ?? false) !== result.all_released) {
-          update.all_released = result.all_released;
-        }
-        const latest = result.status === "not_out" ? null : result.latest_episode;
-        if ((latest || result.status === "not_out") && (current.latest_episode ?? null) !== latest) {
-          update.latest_episode = latest;
-        }
-        if (
-          service ||
-          update.airs_on !== undefined ||
-          update.all_released !== undefined ||
-          update.latest_episode !== undefined
-        ) {
-          updates.push(update);
-        }
-      }
-
-      const names = (status: string) =>
-        results.filter((r) => r.status === status).map((r) => r.text);
-      const allOut = names("all_released");
-      const unsure = names("unknown");
-      const foundService = updates
-        .filter((u) => u.service)
-        .map((u) => `${results.find((r) => r.item_id === u.item_id)?.text} (${u.service})`);
-
-      if (updates.length > 0) await applyUpdate(updates);
-
-      // Shows that were checked but needed no change still get their stamp,
-      // outside the undo: nothing about them changed to put back.
-      const updatedIds = new Set(updates.map((u) => u.item_id));
-      const unchanged = stamped.filter((id) => !updatedIds.has(id));
-      if (unchanged.length > 0) {
-        const { error: stampError } = await supabase
-          .from("items")
-          .update({ release_checked_at: checkedAt })
-          .in("id", unchanged);
-        if (!stampError) {
-          setItems((prev) =>
-            prev.map((i) =>
-              unchanged.includes(i.id) ? { ...i, release_checked_at: checkedAt } : i
-            )
-          );
-        }
-      }
-
+      const left = total - checked;
       setInfoMessage(
         [
-          `Checked ${results.length} show${results.length === 1 ? "" : "s"}` +
-            (upToDate > 0 ? ` (${upToDate} already up to date).` : "."),
-          updates.length > 0
-            ? `Updated ${updates.length}.`
-            : "Nothing had changed.",
+          stoppedBy
+            ? `Stopped after checking ${checked} of ${total} show${total === 1 ? "" : "s"} ` +
+              `(${stoppedBy}). Tap Find release days again to check the other ${left}.`
+            : `Checked ${checked} show${checked === 1 ? "" : "s"}` +
+              (upToDate > 0 ? ` (${upToDate} already up to date).` : "."),
+          before.size > 0 ? `Updated ${before.size}.` : "Nothing had changed.",
           allOut.length > 0 ? `Whole season out: ${allOut.join(", ")}.` : "",
           foundService.length > 0 ? `Found where to watch: ${foundService.join(", ")}.` : "",
           unsure.length > 0 ? `Couldn\u2019t confirm: ${unsure.join(", ")}.` : "",
@@ -1077,10 +1086,70 @@ export default function Home() {
           .join(" ")
       );
     } catch (err) {
+      if (before.size > 0) showUpdateReceipt(before);
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setIsFindingDays(false);
+      setFindProgress(null);
     }
+  }
+
+  /**
+   * Turns one batch of lookups into updates. Only fields that actually change
+   * are sent, and an episode it couldn't confirm keeps whatever was there.
+   * Every show looked up is also stamped, so it isn't searched again until its
+   * details could have changed.
+   */
+  function releaseUpdatesFor(results: ReleaseResult[]) {
+    const checkedAt = new Date().toISOString();
+    const stamped: string[] = [];
+    const updates: ItemUpdate[] = [];
+
+    for (const result of results) {
+      const current = items.find((i) => i.id === result.item_id);
+      if (!current) continue;
+      // Undefined means migration 0010 isn't in yet, and sending the column
+      // would fail the whole save.
+      const canStamp = current.release_checked_at !== undefined;
+      if (canStamp) stamped.push(current.id);
+      // A missing service can be found even when the schedule can't.
+      const service = !current.service && result.service ? result.service : null;
+      if (result.status === "unknown" && !service) continue;
+
+      const update: ItemUpdate = {
+        item_id: result.item_id,
+        text: null,
+        qty: null,
+        service,
+        progress: null,
+        profile: null,
+        due_on: current.due_on,
+        ...(canStamp ? { release_checked_at: checkedAt } : {}),
+        done: null,
+      };
+      if (result.status === "unknown") {
+        updates.push(update);
+        continue;
+      }
+      if ((current.airs_on ?? null) !== result.airs_on) update.airs_on = result.airs_on;
+      if ((current.all_released ?? false) !== result.all_released) {
+        update.all_released = result.all_released;
+      }
+      const latest = result.status === "not_out" ? null : result.latest_episode;
+      if ((latest || result.status === "not_out") && (current.latest_episode ?? null) !== latest) {
+        update.latest_episode = latest;
+      }
+      if (
+        service ||
+        update.airs_on !== undefined ||
+        update.all_released !== undefined ||
+        update.latest_episode !== undefined
+      ) {
+        updates.push(update);
+      }
+    }
+
+    return { updates, stamped };
   }
 
   /**
@@ -1793,7 +1862,7 @@ export default function Home() {
                 className="flex items-center gap-2 rounded-full border border-slate-600 bg-slate-500/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40"
               >
                 <CalendarSearch className="h-4 w-4" />
-                {isFindingDays ? "Checking schedules..." : "Find release days"}
+                {isFindingDays ? (findProgress ?? "Checking schedules...") : "Find release days"}
               </button>
             </div>
 
