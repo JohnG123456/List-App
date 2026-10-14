@@ -116,7 +116,7 @@ export async function POST() {
     supabase.from("households").select("*").limit(1).maybeSingle(),
   ]);
 
-  // Chosen in Settings, Haiku 5.5 by default. Haiku only has the basic web
+  // Chosen in Settings, Opus 5.5 by default. Haiku only has the basic web
   // search, which reads results as they come, and no server-side fallback;
   // the larger models get the search that filters results first, and a
   // fallback model if a request is declined.
