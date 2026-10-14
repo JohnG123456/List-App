@@ -11,8 +11,8 @@ import ChipEditor from "@/components/ChipEditor";
 import {
   DEFAULT_MODELS,
   MODEL_COLUMNS,
-  MODEL_OPTIONS,
   modelLabel,
+  modelOptionsFor,
   type ModelFeature,
 } from "@/lib/models";
 
@@ -24,6 +24,11 @@ const MODEL_FEATURES: { feature: ModelFeature; label: string; caption: string }[
   },
   { feature: "pick", label: "What to watch", caption: "Picks from your watchlist." },
   { feature: "readPhoto", label: "Reading photos", caption: "Turns a photo of a list into items." },
+  {
+    feature: "releaseDays",
+    label: "Release days",
+    caption: "Searches the web for when shows release. Larger models check their sources harder.",
+  },
 ];
 
 /**
@@ -530,7 +535,7 @@ export default function SettingsPage() {
                       <option value="">
                         Default ({modelLabel(DEFAULT_MODELS[feature])})
                       </option>
-                      {MODEL_OPTIONS.map((option) => (
+                      {modelOptionsFor(feature).map((option) => (
                         <option key={option.id} value={option.id}>
                           {option.label} &ndash; {option.note}
                         </option>

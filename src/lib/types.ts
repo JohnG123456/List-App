@@ -59,6 +59,7 @@ export type Household = {
   capture_model?: string | null;
   pick_model?: string | null;
   read_photo_model?: string | null;
+  release_days_model?: string | null;
 };
 
 export type Member = {

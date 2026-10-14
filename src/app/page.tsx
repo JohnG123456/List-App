@@ -962,15 +962,18 @@ export default function Home() {
         text: string;
         status: "weekly" | "all_released" | "not_out" | "unknown";
         airs_on: string | null;
+        service: string | null;
         latest_episode: string | null;
         all_released: boolean;
       }[] = data.results;
 
       const updates: ItemUpdate[] = [];
       for (const result of results) {
-        if (result.status === "unknown") continue;
         const current = items.find((i) => i.id === result.item_id);
         if (!current) continue;
+        // A missing service can be found even when the schedule can't.
+        const service = !current.service && result.service ? result.service : null;
+        if (result.status === "unknown" && !service) continue;
 
         // Only fields that actually change are sent. An episode it couldn't
         // confirm keeps whatever was there rather than being blanked.
@@ -978,12 +981,16 @@ export default function Home() {
           item_id: result.item_id,
           text: null,
           qty: null,
-          service: null,
+          service,
           progress: null,
           profile: null,
           due_on: current.due_on,
           done: null,
         };
+        if (result.status === "unknown") {
+          updates.push(update);
+          continue;
+        }
         if ((current.airs_on ?? null) !== result.airs_on) update.airs_on = result.airs_on;
         if ((current.all_released ?? false) !== result.all_released) {
           update.all_released = result.all_released;
@@ -993,6 +1000,7 @@ export default function Home() {
           update.latest_episode = latest;
         }
         if (
+          service ||
           update.airs_on !== undefined ||
           update.all_released !== undefined ||
           update.latest_episode !== undefined
@@ -1005,6 +1013,9 @@ export default function Home() {
         results.filter((r) => r.status === status).map((r) => r.text);
       const allOut = names("all_released");
       const unsure = names("unknown");
+      const foundService = updates
+        .filter((u) => u.service)
+        .map((u) => `${results.find((r) => r.item_id === u.item_id)?.text} (${u.service})`);
 
       if (updates.length > 0) await applyUpdate(updates);
       setInfoMessage(
@@ -1013,6 +1024,7 @@ export default function Home() {
             ? `Updated ${updates.length} show${updates.length === 1 ? "" : "s"}.`
             : "Everything was already up to date.",
           allOut.length > 0 ? `Whole season out: ${allOut.join(", ")}.` : "",
+          foundService.length > 0 ? `Found where to watch: ${foundService.join(", ")}.` : "",
           unsure.length > 0 ? `Couldn\u2019t confirm: ${unsure.join(", ")}.` : "",
         ]
           .filter(Boolean)

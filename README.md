@@ -18,6 +18,7 @@ Supabase so it's the same on every device.
    - `0006_due_dates_and_invites.sql` — due dates on items, grouping a list by when things are due, and the function that shows who has actually signed up.
    - `0008_airs_on.sql` — the weekday a show's new episodes come out, shown on the TV lists.
    - `0009_season_status.sql` — the newest episode out and whether the whole season is out, filled in by Find release days.
+   - `0010_release_days_model.sql` — which Claude model Find release days uses, chosen in Settings.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**:
@@ -127,10 +128,14 @@ as of today in Australia (often a day behind the US):
 - **latest S2 E5** — the newest episode released, beside where you're up to.
 
 Anything it can't confirm is left alone and named, so a guess never lands as
-fact, and an episode number it couldn't pin down keeps whatever was there. It runs
-on Haiku 5.5 to keep it cheap; set `CLAUDE_RELEASE_DAYS_MODEL` to
-`claude-opus-5-5` or `claude-sonnet-5-5` if its answers prove unreliable, and
-those get the newer web search that filters results before reading them. A
+fact, and an episode number it couldn't pin down keeps whatever was there. A show with no
+streaming service gets one filled in too, but only from the services the
+household has set up, and a service already set is never changed.
+
+It runs on Haiku 5.5 by default; **Settings → AI models → Release days**
+switches it to Sonnet 5.5 or Opus 5.5, which get the newer web search that
+filters results before reading them. Those are offered here and not for the
+other features because this is the one route that doesn't force a tool call. A
 full list takes a minute or two. Each run costs roughly a web search per show plus the tokens
 to read the results, so it's a button rather than something that runs on its
 own.

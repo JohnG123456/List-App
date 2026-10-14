@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { WEEKDAYS } from "@/lib/display";
+import { modelFor } from "@/lib/models";
 
 /**
  * "Which day do new episodes come out?" for every show on the TV lists.
@@ -14,16 +15,6 @@ import { WEEKDAYS } from "@/lib/display";
 
 // A web search per show adds up; the default function limit cuts it short.
 export const maxDuration = 300;
-
-// Haiku by default: this is a lookup, run on a button, and cheap matters.
-// CLAUDE_RELEASE_DAYS_MODEL switches to Opus or Sonnet if Haiku's answers
-// turn out to be shaky.
-const MODEL = process.env.CLAUDE_RELEASE_DAYS_MODEL?.trim() || "claude-haiku-5-5";
-
-// Haiku only has the basic web search, which reads results as they come, and
-// no server-side fallback. The larger models get the newer search that
-// filters results first, and a fallback model if a request is declined.
-const IS_HAIKU = MODEL.startsWith("claude-haiku");
 
 // Enough for a household's watchlist; past this the request gets slow.
 const MAX_SHOWS = 25;
@@ -61,6 +52,13 @@ const RECORD_TOOL: Anthropic.Beta.BetaTool = {
                 "For weekly only, the weekday a new episode becomes available " +
                 "in Australia. Empty otherwise.",
             },
+            service: {
+              type: "string",
+              description:
+                "Only for a show with no service given: which of the household's " +
+                "services it streams on in Australia, spelled exactly as listed. " +
+                "Empty when a service was given, or it isn't on any of theirs.",
+            },
             latest_episode: {
               type: "string",
               description:
@@ -75,7 +73,7 @@ const RECORD_TOOL: Anthropic.Beta.BetaTool = {
                 "or \"Season 2 dropped all at once\".",
             },
           },
-          required: ["item_id", "status", "airs_on", "latest_episode", "note"],
+          required: ["item_id", "status", "airs_on", "service", "latest_episode", "note"],
         },
       },
     },
@@ -87,6 +85,7 @@ type Finding = {
   item_id: string;
   status: string;
   airs_on: string;
+  service: string;
   latest_episode: string;
   note: string;
 };
@@ -111,10 +110,19 @@ export async function POST() {
     );
   }
 
-  const { data: lists, error: listsError } = await supabase
-    .from("lists")
-    .select("id, kind, is_archive")
-    .eq("kind", "watch");
+  const [{ data: lists, error: listsError }, { data: household }] = await Promise.all([
+    supabase.from("lists").select("id, kind, is_archive").eq("kind", "watch"),
+    // "*" so a database without migration 0010's model column still answers.
+    supabase.from("households").select("*").limit(1).maybeSingle(),
+  ]);
+
+  // Chosen in Settings, Haiku 5.5 by default. Haiku only has the basic web
+  // search, which reads results as they come, and no server-side fallback;
+  // the larger models get the search that filters results first, and a
+  // fallback model if a request is declined.
+  const model = modelFor("releaseDays", household);
+  const isHaiku = model.startsWith("claude-haiku");
+  const services: string[] = household?.services ?? [];
 
   if (listsError) {
     return NextResponse.json({ error: listsError.message }, { status: 500 });
@@ -170,6 +178,11 @@ export async function POST() {
     "time difference, so prefer an Australian source or convert the US release",
     "time to Perth time, including for which episode is out as of today.",
     "",
+    services.length
+      ? `Their streaming services: ${services.join(", ")}. For a show with no ` +
+        "service given, also find which of these it streams on in Australia."
+      : "",
+    "",
     "Answer \"unknown\" when you can't confirm it, and leave latest_episode",
     "empty rather than estimating it. A wrong answer is worse than none.",
     "",
@@ -181,7 +194,7 @@ export async function POST() {
     .map(
       (s) =>
         `- ${s.id} | ${s.text}` +
-        `${s.service ? ` | watched on ${s.service}` : ""}` +
+        `${s.service ? ` | watched on ${s.service}` : " | service not known"}` +
         `${s.progress ? ` | they are up to ${s.progress}` : ""}`
     )
     .join("\n");
@@ -197,16 +210,16 @@ export async function POST() {
     // sending the paused turn back carries on from where it stopped.
     for (let round = 0; round < 4; round++) {
       message = await anthropic.beta.messages.create({
-        model: MODEL,
+        model,
         max_tokens: 16000,
-        ...(IS_HAIKU
+        ...(isHaiku
           ? {}
           : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
         output_config: { effort: "medium" },
         system,
         tools: [
           {
-            type: IS_HAIKU ? "web_search_20250305" : "web_search_20260209",
+            type: isHaiku ? "web_search_20250305" : "web_search_20260209",
             name: "web_search",
             max_uses: Math.min(shows.length * 2, 30),
             user_location: {
@@ -257,11 +270,17 @@ export async function POST() {
     .filter((r) => byId.has(r.item_id) && STATUSES.has(r.status))
     .map((r) => {
       const weekly = r.status === "weekly" && WEEKDAYS.includes(r.airs_on);
+      // A service is only ever filled in, never changed, and only to one of
+      // the household's own, in the household's spelling.
+      const service = byId.get(r.item_id)!.service
+        ? null
+        : (services.find((s) => s.toLowerCase() === r.service.trim().toLowerCase()) ?? null);
       return {
         item_id: r.item_id,
         text: byId.get(r.item_id)!.text,
         status: r.status === "weekly" && !weekly ? "unknown" : r.status,
         airs_on: weekly ? r.airs_on : null,
+        service,
         latest_episode: normaliseEpisode(r.latest_episode),
         all_released: r.status === "all_released",
         note: r.note,
