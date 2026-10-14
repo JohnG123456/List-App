@@ -47,7 +47,9 @@ export const DEFAULT_MODELS: Record<ModelFeature, ModelId> = {
   capture: "claude-haiku-5-5",
   pick: "claude-opus-5",
   readPhoto: "claude-opus-5",
-  releaseDays: "claude-haiku-5-5",
+  // Haiku was tried first and confirmed far fewer shows; worth the extra cost
+  // on a button pressed now and then.
+  releaseDays: "claude-opus-5-5",
 };
 
 const ENV_VARS: Record<ModelFeature, string> = {
