@@ -1,13 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import type { Household, Item, List } from "@/lib/types";
+import type { Attachment, Household, Item, List } from "@/lib/types";
 import { WEEKDAYS, addDays, localDateKey } from "@/lib/display";
+import AttachmentsPanel from "@/components/AttachmentsPanel";
 
 type Props = {
   item: Item;
   list: List;
   household: Household | null;
+  attachments: Attachment[];
+  onAttachmentsAdded: (added: Attachment[]) => void;
+  onAttachmentRemoved: (removed: Attachment) => void;
   onSave: (patch: Partial<Item>) => void;
   onCancel: () => void;
 };
@@ -22,7 +26,16 @@ type Props = {
  * It lives at page level because every row carries a backdrop blur, and a
  * panel drawn inside one is trapped in that row's stacking context.
  */
-export default function EditSheet({ item, list, household, onSave, onCancel }: Props) {
+export default function EditSheet({
+  item,
+  list,
+  household,
+  attachments,
+  onAttachmentsAdded,
+  onAttachmentRemoved,
+  onSave,
+  onCancel,
+}: Props) {
   const [text, setText] = useState(item.text);
   const [service, setService] = useState(item.service ?? "");
   const [progress, setProgress] = useState(item.progress ?? "");
@@ -261,6 +274,14 @@ export default function EditSheet({ item, list, household, onSave, onCancel }: P
             </select>
           </div>
         )}
+
+        <AttachmentsPanel
+          itemId={item.id}
+          householdId={household?.id ?? null}
+          attachments={attachments}
+          onAdded={onAttachmentsAdded}
+          onRemoved={onAttachmentRemoved}
+        />
 
         <div className="flex gap-2 pt-1">
           <button

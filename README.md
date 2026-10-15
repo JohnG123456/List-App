@@ -19,12 +19,15 @@ Supabase so it's the same on every device.
    - `0008_airs_on.sql` — the weekday a show's new episodes come out, shown on the TV lists.
    - `0009_season_status.sql` — the newest episode out and whether the whole season is out, filled in by Find release days.
    - `0010_release_days_settings.sql` — which Claude model Find release days uses, and when each show was last looked up.
+   - `0011_security_hardening.sql` — the sign-up allow-list as a Supabase Auth hook (switch it on in step 7), and stops members changing anything on their own membership row except their initials.
+   - `0012_item_attachments.sql` — photos and documents on items: a private `attachments` Storage bucket (10 MB a file, photos/PDF/Office/text only) and who can read, add and remove them.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**:
    - Set **Site URL** to your deployed URL, not `http://localhost:3000`. Supabase falls back to this when building links, so leaving it on localhost sends people a confirmation link their phone can't open.
    - Add both `http://localhost:3000/auth/callback` and `https://<your-deployment>/auth/callback` to the redirect allow list. Sign-up asks to be sent back to whichever origin it was used from, and an origin that isn't on this list is ignored in favour of the Site URL.
 6. Copy the project URL and anon key from **Project Settings → API**.
+7. In **Authentication → Hooks**, add a **Before User Created** hook, type **Postgres**, function `public.hook_before_user_created` (from migration `0011`). Until this is on, the allow-list is only checked by the login page.
 
 ### 2. Anthropic API key
 
@@ -79,7 +82,7 @@ Sign-up is invite-only. The `allowed_emails` table (migration `0002`) holds the 
 
 Before migration `0003` the admin's email was hardcoded in two places, the page and the RLS policies. It no longer is: ownership is a column, and the migration makes each existing user the owner of their own household.
 
-This check runs in the app's UI, not as a database-level lock — someone who called Supabase's auth API directly (bypassing the web app entirely) could still sign up with an email that isn't on the list. Fine for sharing a link with people you trust to just use the app normally; if that gap ever matters, the stronger fix is a Supabase Auth Hook that rejects disallowed sign-ups at the database level.
+The login page's check is a courtesy; the lock is the **Before User Created** auth hook from migration `0011` (setup step 7), which has Supabase itself refuse to create an account for an email that isn't on the list, however the request arrives. Without the hook switched on, anyone could sign up by calling Supabase's API directly with the public anon key. Such an account would see no lists, and the AI routes also refuse anyone who isn't in a household, but turn the hook on.
 
 ## Deploying
 
@@ -99,6 +102,24 @@ lists stay private. Only the household owner can add or remove people.
 A list is shared with the whole household unless it's marked private to one
 person. Careful with that switch: making a shared list private hides it from
 everyone else, and only the person who did it can share it again.
+
+## Photos and documents
+
+Any item can carry photos and files: open it with the pencil, then **Add a
+photo or file**. On a phone that one button offers the camera, the photo
+library and Files. A paperclip on the row shows an item has some.
+
+- Files go straight from the browser to a **private** Supabase Storage bucket
+  and are opened through links that expire after five minutes. Only people who
+  can see the item can get a link, so photos on a private list stay private
+  even from the rest of the household.
+- Photos are shrunk to 2048 px and re-saved as JPEG before upload, which also
+  strips their metadata, including the location a phone records.
+- **Photograph a list** keeps the photo: everything added from it gets the
+  photo attached, stored once and shared. Tap the × on the "Photo will be
+  attached" note to skip it.
+- Deleting an item, or undoing an add, deletes its files too, unless another
+  item still uses the same photo.
 
 ## The TV lists
 

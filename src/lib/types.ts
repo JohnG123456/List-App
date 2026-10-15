@@ -51,6 +51,18 @@ export type Item = {
   release_checked_at?: string | null;
 };
 
+/** A photo or document on an item. The file itself is in Storage at `path`. */
+export type Attachment = {
+  id: string;
+  item_id: string;
+  path: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  created_by: string | null;
+  created_at: string;
+};
+
 export type Household = {
   id: string;
   name: string;

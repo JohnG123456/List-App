@@ -6,6 +6,8 @@ import {
   ListChecks,
   Mail,
   Mic,
+  Paperclip,
+  X,
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
   CalendarSearch,
@@ -20,6 +22,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type {
+  Attachment,
   Household,
   Item,
   ItemUpdate,
@@ -44,6 +47,7 @@ import {
 } from "@/lib/display";
 import { matchLocalCommand } from "@/lib/commands";
 import { modelLabel } from "@/lib/models";
+import { attachFile, removeFiles, shrinkPhoto } from "@/lib/attachments";
 import PillRail from "@/components/PillRail";
 import EditSheet from "@/components/EditSheet";
 import ItemRow from "@/components/ItemRow";
@@ -112,6 +116,7 @@ export default function Home() {
 
   const [lists, setLists] = useState<List[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [household, setHousehold] = useState<Household | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,6 +152,8 @@ export default function Home() {
   const [globalQuery, setGlobalQuery] = useState("");
   const [sortDirs, setSortDirs] = useState<Record<string, SortDirection>>({});
   const [isReadingPhoto, setIsReadingPhoto] = useState(false);
+  // The photographed list itself, kept to attach to whatever is added from it.
+  const [listPhoto, setListPhoto] = useState<File | null>(null);
   const [servicingItem, setServicingItem] = useState<Item | null>(null);
   const [watchQuery, setWatchQuery] = useState("");
   const [picks, setPicks] = useState<
@@ -190,8 +197,14 @@ export default function Home() {
     let cancelled = false;
 
     async function loadData() {
-      const [userResult, listsResult, itemsResult, householdResult, membersResult] =
-        await Promise.all([
+      const [
+        userResult,
+        listsResult,
+        itemsResult,
+        householdResult,
+        membersResult,
+        attachmentsResult,
+      ] = await Promise.all([
           supabase.auth.getUser(),
           supabase.from("lists").select("*").order("position", { ascending: true }),
           supabase
@@ -201,6 +214,9 @@ export default function Home() {
             .order("created_at", { ascending: true }),
           supabase.from("households").select("*").limit(1).maybeSingle(),
           supabase.from("household_members").select("*"),
+          // Errors on a database without migration 0012 yet, which just
+          // means no paperclips.
+          supabase.from("item_attachments").select("*"),
         ]);
 
       if (cancelled) return;
@@ -215,6 +231,7 @@ export default function Home() {
       const loadedLists = listsResult.data ?? [];
       setLists(loadedLists);
       setItems(itemsResult.data ?? []);
+      setAttachments(attachmentsResult.data ?? []);
       setHousehold(householdResult.data ?? null);
 
       const loadedMembers = membersResult.data ?? [];
@@ -334,6 +351,11 @@ export default function Home() {
   }, [activeGroup, freshListIds, lists, items]);
 
   const groups = useMemo(() => groupNames(lists), [lists]);
+  const attachmentCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of attachments) counts.set(a.item_id, (counts.get(a.item_id) ?? 0) + 1);
+    return counts;
+  }, [attachments]);
   const visibleLists = useMemo(
     () => listsInGroup(lists, activeGroup),
     [lists, activeGroup]
@@ -551,6 +573,8 @@ export default function Home() {
         await applyAction(data.action);
       }
 
+      // Only ever attached to what's added from the box it filled.
+      setListPhoto(null);
       setDictation("");
       dictationRef.current = "";
     } catch (err) {
@@ -576,6 +600,26 @@ export default function Home() {
     setFreshIds((prev) => new Set([...prev, ...rows.map((r) => r.id)]));
     setFreshListIds((prev) => new Set([...prev, ...rows.map((r) => r.list_id)]));
 
+    // Everything read from a photographed list keeps the photo, stored once
+    // and shared by all of them. The items are already saved, so a failed
+    // upload is worth saying but not worth undoing them over.
+    let photoPaths: string[] = [];
+    if (listPhoto && household) {
+      const photo = listPhoto;
+      setListPhoto(null);
+      try {
+        const added = await attachFile(supabase, household.id, rows.map((r) => r.id), photo);
+        photoPaths = added.map((a) => a.path);
+        setAttachments((prev) => [...prev, ...added]);
+      } catch (err) {
+        setError(
+          `Added, but couldn't attach the photo: ${
+            err instanceof Error ? err.message : "something went wrong"
+          }`
+        );
+      }
+    }
+
     // The receipt is what makes auto-routing safe: it says where everything
     // went, jumps you there, and puts it all back in one tap.
     const counts = new Map<string, number>();
@@ -600,6 +644,8 @@ export default function Home() {
           return;
         }
         setItems((prev) => prev.filter((i) => !ids.includes(i.id)));
+        setAttachments((prev) => prev.filter((a) => !ids.includes(a.item_id)));
+        await removeFiles(supabase, photoPaths);
         setReceipt(null);
       },
     });
@@ -838,13 +884,21 @@ export default function Home() {
   }
 
   async function deleteItem(item: Item) {
-    if (!window.confirm(`Delete "${item.text}"?`)) return;
+    const files = attachments.filter((a) => a.item_id === item.id);
+    const note = files.length
+      ? ` Its ${files.length === 1 ? "attachment goes" : `${files.length} attachments go`} too.`
+      : "";
+    if (!window.confirm(`Delete "${item.text}"?${note}`)) return;
     const { error: deleteError } = await supabase.from("items").delete().eq("id", item.id);
     if (deleteError) {
       setError(deleteError.message);
       return;
     }
     setItems((prev) => prev.filter((i) => i.id !== item.id));
+    // The rows went with the item; the files themselves have to be removed
+    // separately. A photo another item still uses is kept by the database.
+    setAttachments((prev) => prev.filter((a) => a.item_id !== item.id));
+    await removeFiles(supabase, files.map((f) => f.path));
   }
 
   async function moveItem(item: Item, listId: string) {
@@ -1312,8 +1366,11 @@ export default function Home() {
     setError(null);
 
     try {
+      // Shrunk first: the server only takes a few MB, and a phone photo of a
+      // list is often more than that straight off the camera.
+      const photo = await shrinkPhoto(file);
       const body = new FormData();
-      body.append("photo", file);
+      body.append("photo", photo);
       const res = await fetch("/api/read-photo", { method: "POST", body });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not read that photo");
@@ -1324,6 +1381,7 @@ export default function Home() {
       const text = data.text as string;
       dictationRef.current = text;
       setDictation(text);
+      setListPhoto(photo);
       setInfoMessage("Read from the photo. Check it, then press Go.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -1462,6 +1520,7 @@ export default function Home() {
                   isFresh={freshIds.has(item.id)}
                   addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                   doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                  attachmentCount={attachmentCounts.get(item.id) ?? 0}
                   onToggleDone={toggleDone}
                   onRequestEdit={setEditingItem}
                   onDelete={deleteItem}
@@ -1554,6 +1613,7 @@ export default function Home() {
                 isFresh={false}
                 addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                 doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                attachmentCount={attachmentCounts.get(item.id) ?? 0}
                 onToggleDone={toggleDone}
                 onRequestEdit={setEditingItem}
                 onDelete={deleteItem}
@@ -1618,6 +1678,20 @@ export default function Home() {
             rows={3}
             className="w-full resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none"
           />
+          {listPhoto && (
+            <div className="mt-1 flex w-fit items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800/60 py-0.5 pl-2.5 pr-1 text-xs text-slate-300">
+              <Paperclip className="h-3 w-3" />
+              Photo will be attached to what you add
+              <button
+                onClick={() => setListPhoto(null)}
+                aria-label="Don't attach the photo"
+                title="Don't attach the photo"
+                className="rounded-full p-0.5 text-slate-500 hover:text-slate-200"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
           <div className="mt-2 flex items-center gap-2">
             <span className="mr-auto text-xs text-slate-500">
               {isRecording ? 'Say "go" when you\'re finished' : ""}
@@ -1915,6 +1989,7 @@ export default function Home() {
                     isFresh={false}
                     addedByInitials={initialsFor(item.created_by, members, memberEmails)}
                     doneByInitials={initialsFor(item.done_by, members, memberEmails)}
+                  attachmentCount={attachmentCounts.get(item.id) ?? 0}
                     onToggleDone={toggleDone}
                     onRequestEdit={setEditingItem}
                     onDelete={deleteItem}
@@ -1966,6 +2041,11 @@ export default function Home() {
           item={editingItem}
           list={listById(editingItem.list_id)!}
           household={household}
+          attachments={attachments.filter((a) => a.item_id === editingItem.id)}
+          onAttachmentsAdded={(added) => setAttachments((prev) => [...prev, ...added])}
+          onAttachmentRemoved={(removed) =>
+            setAttachments((prev) => prev.filter((a) => a.id !== removed.id))
+          }
           onSave={(patch) => {
             void editItem(editingItem, patch);
             setEditingItem(null);

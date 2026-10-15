@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, isHouseholdMember } from "@/lib/supabase/server";
 import { modelFor } from "@/lib/models";
 
 /**
@@ -168,6 +168,10 @@ export async function POST(request: Request) {
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!(await isHouseholdMember(supabase, user.id))) {
+    return NextResponse.json({ error: "Not part of a household" }, { status: 403 });
   }
 
   const body = await request.json();
