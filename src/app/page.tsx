@@ -80,6 +80,10 @@ const SUBMIT_TRIGGERS = [
   "done",
 ];
 
+// What you say to put it straight on the list on screen, skipping Claude.
+// "directly" and "ad direct" are how dictation often hears it.
+const DIRECT_TRIGGERS = ["add directly", "add direct", "ad directly", "ad direct"];
+
 /**
  * Finds a spoken submit phrase and strips it off.
  *
@@ -87,12 +91,21 @@ const SUBMIT_TRIGGERS = [
  * would fire halfway through a sentence: "make a list of things for the shops"
  * would submit on "make a list", and "go to the hardware store" on "go".
  */
-function extractSubmitTrigger(text: string) {
+function extractSubmitTrigger(text: string): {
+  triggered: false | "claude" | "direct";
+  cleaned: string;
+} {
   // Speech recognition adds trailing punctuation and curly apostrophes.
   const normalised = text.replace(/\u2019/g, "'").replace(/[.!?,;\s]+$/, "");
   const lower = normalised.toLowerCase();
 
-  for (const phrase of SUBMIT_TRIGGERS) {
+  // Direct first, so it is never mistaken for a sort-it-out phrase.
+  const phrases = [
+    ...DIRECT_TRIGGERS.map((phrase) => ({ phrase, kind: "direct" as const })),
+    ...SUBMIT_TRIGGERS.map((phrase) => ({ phrase, kind: "claude" as const })),
+  ];
+
+  for (const { phrase, kind } of phrases) {
     if (!lower.endsWith(phrase)) continue;
 
     const start = normalised.length - phrase.length;
@@ -100,7 +113,7 @@ function extractSubmitTrigger(text: string) {
     if (start > 0 && /[a-z0-9]/i.test(normalised[start - 1])) continue;
 
     const cleaned = normalised.slice(0, start).replace(/[.,;!?\s]+$/, "").trim();
-    return { triggered: true, cleaned };
+    return { triggered: kind, cleaned };
   }
 
   return { triggered: false, cleaned: text };
@@ -170,6 +183,7 @@ export default function Home() {
   // submit would call the handler captured on the render that started it,
   // which has stale items and no signed-in user.
   const captureRef = useRef<(text: string) => Promise<void>>(async () => {});
+  const quickAddRef = useRef<(text: string) => Promise<void>>(async () => {});
   const shouldRecordRef = useRef(false);
   const dictationRef = useRef("");
   const activeGroupRef = useRef("");
@@ -365,12 +379,19 @@ export default function Home() {
     () => [...lists].sort((a, b) => a.position - b.position),
     [lists]
   );
-  // Where the quick-add button sends things: the first real list on the pill
-  // being looked at. Archives like Watched are never the place to add to.
-  const quickAddList = useMemo(
-    () => visibleLists.find((l) => !l.is_archive) ?? null,
-    [visibleLists]
-  );
+  // Where the quick-add button sends things. On the TV pill that's Watching
+  // now, found as the watch list whose ticked shows move on to Watched, so it
+  // survives a rename. Everywhere else, the first real list on the pill.
+  // Archives like Watched are never the place to add to.
+  const quickAddList = useMemo(() => {
+    const open = visibleLists.filter((l) => !l.is_archive);
+    return (
+      open.find((l) => l.kind === "watch" && l.done_to) ??
+      open.find((l) => l.name.toLowerCase() === "watching now") ??
+      open[0] ??
+      null
+    );
+  }, [visibleLists]);
   const isWatchGroup = useMemo(
     () => visibleLists.some((l) => l.kind === "watch"),
     [visibleLists]
@@ -472,7 +493,9 @@ export default function Home() {
       if (triggered && cleaned) {
         shouldRecordRef.current = false;
         recognitionRef.current?.stop();
-        void captureRef.current(cleaned);
+        void (triggered === "direct"
+          ? quickAddRef.current(cleaned)
+          : captureRef.current(cleaned));
       }
     };
 
@@ -599,9 +622,9 @@ export default function Home() {
    * interpreted, so no due days, quantities or services — but a grocery that's
    * been bought before goes back into the aisle it was in last time.
    */
-  async function handleQuickAdd() {
+  async function handleQuickAdd(textOverride?: string) {
     const list = quickAddList;
-    const texts = dictation
+    const texts = (textOverride ?? dictation)
       .split(/[\n,;]+/)
       .map((t) => t.trim().replace(/[.!?]+$/, "").trim())
       .filter(Boolean);
@@ -873,6 +896,9 @@ export default function Home() {
   useEffect(() => {
     captureRef.current = async (text: string) => {
       await handleCapture(text);
+    };
+    quickAddRef.current = async (text: string) => {
+      await handleQuickAdd(text);
     };
   });
 
@@ -1772,7 +1798,11 @@ export default function Home() {
           )}
           <div className="mt-2 flex items-center gap-2">
             <span className="mr-auto text-xs text-slate-500">
-              {isRecording ? 'Say "go" when you\'re finished' : ""}
+              {isRecording
+                ? quickAddList
+                  ? `"Go" to sort, "add direct" for ${quickAddList.name}`
+                  : 'Say "go" when you\'re finished'
+                : ""}
             </span>
             {isRecording && (
               <div className="flex h-5 items-end gap-0.5">
