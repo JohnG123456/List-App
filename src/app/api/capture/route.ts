@@ -64,8 +64,15 @@ const ROUTE_TOOL: Anthropic.Tool = {
                 "The day it is due, as YYYY-MM-DD, when they said when. Empty " +
                 "when no day was mentioned — do not invent one.",
             },
+            watcher: {
+              type: "string",
+              description:
+                "For a show only one person watches on their own, that person, " +
+                "from the household's viewing profiles. Empty means watched " +
+                "together, which is the default.",
+            },
           },
-          required: ["text", "list_id", "qty", "aisle", "service", "progress", "profile", "suggested_by", "due_on", "airs_on"],
+          required: ["text", "list_id", "qty", "aisle", "service", "progress", "profile", "suggested_by", "due_on", "airs_on", "watcher"],
         },
       },
       updates: {
@@ -94,13 +101,20 @@ const ROUTE_TOOL: Anthropic.Tool = {
                 "New due day as YYYY-MM-DD, or empty to leave alone. Use " +
                 "\"none\" to clear an existing one.",
             },
+            watcher: {
+              type: "string",
+              description:
+                "Who now watches the show on their own, from the viewing " +
+                "profiles, or empty to leave alone. Use \"together\" when it " +
+                "goes back to being watched together.",
+            },
             done: {
               type: "string",
               enum: ["done", "not_done", "unchanged"],
               description: "Whether this ticks the item off.",
             },
           },
-          required: ["item_id", "text", "qty", "service", "progress", "profile", "due_on", "airs_on", "done"],
+          required: ["item_id", "text", "qty", "service", "progress", "profile", "due_on", "airs_on", "watcher", "done"],
         },
       },
       answer: {
@@ -257,6 +271,7 @@ export async function POST(request: Request) {
         `${i.airs_on ? ` | new episodes ${i.airs_on}s` : ""}` +
         `${i.latest_episode ? ` | latest episode out ${i.latest_episode}` : ""}` +
         `${i.all_released ? " | whole season out" : ""}` +
+        `${i.watcher ? ` | only ${i.watcher} watches it` : ""}` +
         `${i.done ? " | finished" : ""}`
     ),
     "",
@@ -268,6 +283,10 @@ export async function POST(request: Request) {
     "drops Fridays\"), set airs_on on that show. Never fill it in from what you",
     "think you know about the show: schedules change and a wrong day is worse",
     "than none.",
+    "Shows are watched together unless they say otherwise. When they say only",
+    "one person watches something, or someone watches it on their own (\"Dawn's",
+    "watching The Crown by herself\"), set watcher to that person. Leave it",
+    "empty otherwise.",
     "",
     "Ticking a single item off, switching list, and reading a list aloud are",
     "handled before this point, so anything arriving here needed more than a",
@@ -358,6 +377,13 @@ export async function POST(request: Request) {
   });
   const validListIds = new Set(lists.map((l) => l.id));
   const validItemIds = new Set(items.map((i) => i.id));
+  // A watcher is only kept when it's one of their profiles, matched loosely
+  // so "dawn" still lands as "Dawn".
+  const profiles: string[] = household?.profiles ?? [];
+  const matchProfile = (value: string | undefined) => {
+    const wanted = (value ?? "").trim().toLowerCase();
+    return wanted ? profiles.find((p) => p.toLowerCase() === wanted) ?? null : null;
+  };
 
   if (input.intent === "ask") {
     return reply({ intent: "ask", answer: input.answer });
@@ -388,6 +414,12 @@ export async function POST(request: Request) {
         // Only present when it changes, so updates still apply on a database
         // without migration 0008.
         ...(u.airs_on ? { airs_on: u.airs_on === "none" ? null : u.airs_on } : {}),
+        // Likewise for migration 0014.
+        ...(u.watcher?.trim().toLowerCase() === "together"
+          ? { watcher: null }
+          : matchProfile(u.watcher)
+            ? { watcher: matchProfile(u.watcher) }
+            : {}),
         done: u.done === "done" ? true : u.done === "not_done" ? false : null,
       }));
 
@@ -417,6 +449,7 @@ export async function POST(request: Request) {
       suggested_by: orNull(i.suggested_by),
       due_on: orNull(i.due_on),
       ...(orNull(i.airs_on) ? { airs_on: orNull(i.airs_on) } : {}),
+      ...(matchProfile(i.watcher) ? { watcher: matchProfile(i.watcher) } : {}),
     }));
 
   if (newItems.length === 0) {

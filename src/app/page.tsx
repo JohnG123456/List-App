@@ -63,6 +63,12 @@ const FRESH_HOLD_MS = 2600;
 
 const LAST_GROUP_KEY = "list-app:last-group";
 const SORT_KEY = "list-app:sort";
+const WATCHER_KEY = "list-app:watcher";
+
+// The TV filter: everything, shows watched together, or one person's own.
+// Anything else is a viewing profile's name.
+const ALL_SHOWS = "";
+const TOGETHER = "together";
 
 // What you say to stop dictating and send it. Longer phrases sit first so
 // "create my list" doesn't leave a stray "my" behind after a looser match.
@@ -170,6 +176,8 @@ export default function Home() {
   const [listPhoto, setListPhoto] = useState<File | null>(null);
   const [servicingItem, setServicingItem] = useState<Item | null>(null);
   const [watchQuery, setWatchQuery] = useState("");
+  // Remembered per phone, so Dawn's opens on Dawn's and John's on John's.
+  const [watcherFilter, setWatcherFilter] = useState<string>(ALL_SHOWS);
   const [picks, setPicks] = useState<
     { item_id: string; text: string; service: string | null; reason: string }[] | null
   >(null);
@@ -274,6 +282,8 @@ export default function Home() {
       try {
         const storedSort = window.localStorage.getItem(SORT_KEY);
         if (storedSort) setSortDirs(JSON.parse(storedSort));
+        const storedWatcher = window.localStorage.getItem(WATCHER_KEY);
+        if (storedWatcher) setWatcherFilter(storedWatcher);
       } catch {
         // A remembered sort order is a convenience, not worth failing over.
       }
@@ -397,6 +407,34 @@ export default function Home() {
     () => visibleLists.some((l) => l.kind === "watch"),
     [visibleLists]
   );
+
+  // The people worth a filter chip: anyone with a show of their own, plus
+  // whoever is selected, so a remembered choice never vanishes from view.
+  const watcherOptions = useMemo(() => {
+    const inUse = new Set(
+      items.map((i) => i.watcher).filter((w): w is string => Boolean(w))
+    );
+    if (watcherFilter !== ALL_SHOWS && watcherFilter !== TOGETHER) inUse.add(watcherFilter);
+    const ordered = (household?.profiles ?? []).filter((p) => inUse.has(p));
+    return [...ordered, ...[...inUse].filter((w) => !ordered.includes(w))];
+  }, [items, household, watcherFilter]);
+
+  function chooseWatcher(next: string) {
+    setWatcherFilter(next);
+    setPicks(null);
+    try {
+      window.localStorage.setItem(WATCHER_KEY, next);
+    } catch {
+      // Not worth failing over.
+    }
+  }
+
+  /** Whether a show belongs under the TV filter that's selected. */
+  function passesWatcher(item: Item) {
+    if (watcherFilter === ALL_SHOWS) return true;
+    if (watcherFilter === TOGETHER) return !item.watcher;
+    return item.watcher === watcherFilter;
+  }
   const verdict = useMemo(
     () => (isWatchGroup ? watchVerdict(watchQuery, items, lists) : null),
     [isWatchGroup, watchQuery, items, lists]
@@ -665,6 +703,10 @@ export default function Home() {
 
       await applyAdd(
         texts.map((text) => ({
+          // Added while looking at one person's shows, it's one of theirs.
+          ...(list.kind === "watch" && watcherFilter !== ALL_SHOWS && watcherFilter !== TOGETHER
+            ? { watcher: watcherFilter }
+            : {}),
           text,
           list_id: list.id,
           qty: null,
@@ -785,6 +827,7 @@ export default function Home() {
         patch.release_checked_at = update.release_checked_at;
       }
       if (update.due_on !== undefined) patch.due_on = update.due_on;
+      if (update.watcher !== undefined) patch.watcher = update.watcher;
       if (update.done !== null) {
         patch.done = update.done;
         patch.done_at = update.done ? new Date().toISOString() : null;
@@ -836,6 +879,8 @@ export default function Home() {
                     all_released: original.all_released,
                   }
                 : {}),
+              // And migration 0014's.
+              ...(original.watcher !== undefined ? { watcher: original.watcher } : {}),
               // Undoing a lookup makes the show due for another one.
               ...(original.release_checked_at !== undefined
                 ? { release_checked_at: original.release_checked_at }
@@ -1106,6 +1151,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           listIds: visibleLists.filter((l) => !l.is_archive).map((l) => l.id),
+          // All shows and Together both mean a night in together.
+          watcher:
+            watcherFilter === ALL_SHOWS || watcherFilter === TOGETHER ? null : watcherFilter,
         }),
       });
       const data = await res.json();
@@ -1554,7 +1602,9 @@ export default function Home() {
   // ------------------------------------------------------------------ render
 
   function renderList(list: List, withHeading: boolean) {
-    const mine = items.filter((i) => i.list_id === list.id);
+    const mine = items.filter(
+      (i) => i.list_id === list.id && (list.kind !== "watch" || passesWatcher(i))
+    );
 
     if (list.is_archive && !openArchives.has(list.id)) {
       return (
@@ -2027,6 +2077,28 @@ export default function Home() {
 
         {isWatchGroup && (
           <div className="space-y-2">
+            {(watcherOptions.length > 0 || watcherFilter !== ALL_SHOWS) && (
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Whose shows">
+                {[
+                  { value: ALL_SHOWS, label: "All" },
+                  { value: TOGETHER, label: "Together" },
+                  ...watcherOptions.map((w) => ({ value: w, label: w })),
+                ].map((option) => (
+                  <button
+                    key={option.value || "all"}
+                    onClick={() => chooseWatcher(option.value)}
+                    aria-pressed={watcherFilter === option.value}
+                    className={`rounded-full border px-3 py-1 text-xs transition ${
+                      watcherFilter === option.value
+                        ? "border-violet-400/70 bg-violet-500/20 text-violet-100"
+                        : "border-slate-700 bg-slate-900/60 text-slate-300 hover:text-slate-100"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input

@@ -67,10 +67,15 @@ export async function POST(request: Request) {
   }
 
   let listIds: string[] = [];
+  // Whose night it is: null for together, otherwise one person's own shows.
+  let watcher: string | null = null;
   try {
     const body = await request.json();
     if (Array.isArray(body?.listIds)) {
       listIds = body.listIds.filter((id: unknown) => typeof id === "string");
+    }
+    if (typeof body?.watcher === "string" && body.watcher.trim()) {
+      watcher = body.watcher.trim();
     }
   } catch {
     // No body is fine; fall back to every watch list below.
@@ -96,7 +101,8 @@ export async function POST(request: Request) {
 
   const { data: candidates, error: itemsError } = await supabase
     .from("items")
-    .select("id, text, service, progress, profile, suggested_by, list_id")
+    // "*" so a database without migration 0014's watcher still answers.
+    .select("*")
     .in(
       "list_id",
       chosen.map((l) => l.id)
@@ -108,10 +114,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: itemsError.message }, { status: 500 });
   }
 
-  const options = candidates ?? [];
+  // A together night never suggests a show only one of you watches, and a
+  // night on your own only suggests your own shows.
+  const options = (candidates ?? []).filter(
+    (o) => ((o.watcher as string | null | undefined) ?? null) === watcher
+  );
   if (options.length === 0) {
     return NextResponse.json(
-      { error: "Nothing saved to watch yet. Add a few titles first." },
+      {
+        error: watcher
+          ? `Nothing saved that only ${watcher} watches yet.`
+          : "Nothing saved to watch together yet. Add a few titles first.",
+      },
       { status: 409 }
     );
   }
@@ -125,6 +139,9 @@ export async function POST(request: Request) {
     "Pick what this household should watch tonight, from the titles they have",
     "already saved. Suggest two, or one if there is genuinely only one sensible",
     "option. Never invent a title that is not in the list below.",
+    watcher
+      ? `Tonight it is ${watcher} watching on their own, and these are the shows only ${watcher} watches.`
+      : "Tonight they are watching together.",
     "",
     services.length
       ? `They subscribe to: ${services.join(", ")}. Prefer something they can actually watch, and say so when a title has no service recorded.`

@@ -40,6 +40,7 @@ export default function EditSheet({
   const [service, setService] = useState(item.service ?? "");
   const [progress, setProgress] = useState(item.progress ?? "");
   const [profile, setProfile] = useState(item.profile ?? "");
+  const [watcher, setWatcher] = useState(item.watcher ?? "");
   const [qty, setQty] = useState(item.qty ?? "");
   const [aisle, setAisle] = useState(item.aisle ?? "");
   const [dueOn, setDueOn] = useState(item.due_on ?? "");
@@ -73,6 +74,8 @@ export default function EditSheet({
         patch.latest_episode = orNull(latestEpisode);
       }
       if (allReleased !== (item.all_released ?? false)) patch.all_released = allReleased;
+      // And migration 0014's.
+      if (orNull(watcher) !== (item.watcher ?? null)) patch.watcher = orNull(watcher);
     } else if (isShop) {
       patch.qty = orNull(qty);
       patch.aisle = orNull(aisle);
@@ -187,6 +190,28 @@ export default function EditSheet({
                 />
                 Whole season is out
               </label>
+            </div>
+
+            <div className="space-y-1">
+              <label className={label} htmlFor="edit-watcher">
+                Who watches it
+              </label>
+              <select
+                id="edit-watcher"
+                value={watcher}
+                onChange={(e) => setWatcher(e.target.value)}
+                className={field}
+              >
+                <option value="">Together</option>
+                {(household?.profiles ?? []).map((option) => (
+                  <option key={option} value={option}>
+                    Only {option}
+                  </option>
+                ))}
+                {watcher && !(household?.profiles ?? []).includes(watcher) && (
+                  <option value={watcher}>Only {watcher}</option>
+                )}
+              </select>
             </div>
 
             <div className="space-y-1">

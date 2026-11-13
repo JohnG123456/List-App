@@ -49,6 +49,8 @@ export type Item = {
   all_released?: boolean;
   /** When Find release days last looked this show up. */
   release_checked_at?: string | null;
+  /** The one person who watches it, from the viewing profiles. Null: together. */
+  watcher?: string | null;
 };
 
 /** A photo or document on an item. The file itself is in Storage at `path`. */
@@ -106,6 +108,7 @@ export type NewItem = {
   suggested_by: string | null;
   due_on: string | null;
   airs_on?: string | null;
+  watcher?: string | null;
 };
 
 export type ItemUpdate = {
@@ -120,6 +123,8 @@ export type ItemUpdate = {
   latest_episode?: string | null;
   all_released?: boolean;
   release_checked_at?: string | null;
+  /** Undefined leaves it alone; null makes it a together show again. */
+  watcher?: string | null;
   done: boolean | null;
 };
 

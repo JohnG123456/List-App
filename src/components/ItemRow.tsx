@@ -147,6 +147,14 @@ export default function ItemRow({
                   {item.progress}
                 </span>
               )}
+              {isWatch && item.watcher && (
+                <span
+                  title={`Only ${item.watcher} watches this`}
+                  className="rounded border border-violet-500/45 bg-violet-500/10 px-1.5 text-[10px] text-violet-200"
+                >
+                  {item.watcher} only
+                </span>
+              )}
               {isWatch && item.airs_on && !item.done && (
                 <span
                   title={`New episodes come out on ${item.airs_on}s`}
