@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ListChecks,
   Mail,
+  Plus,
   Mic,
   Paperclip,
   X,
@@ -364,6 +365,12 @@ export default function Home() {
     () => [...lists].sort((a, b) => a.position - b.position),
     [lists]
   );
+  // Where the quick-add button sends things: the first real list on the pill
+  // being looked at. Archives like Watched are never the place to add to.
+  const quickAddList = useMemo(
+    () => visibleLists.find((l) => !l.is_archive) ?? null,
+    [visibleLists]
+  );
   const isWatchGroup = useMemo(
     () => visibleLists.some((l) => l.kind === "watch"),
     [visibleLists]
@@ -575,6 +582,77 @@ export default function Home() {
 
       // Only ever attached to what's added from the box it filled.
       setListPhoto(null);
+      setDictation("");
+      dictationRef.current = "";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsThinking(false);
+    }
+  }
+
+  /**
+   * Adds what's typed straight to the list on screen, without asking Claude.
+   *
+   * Instant and free, for when you already know where it goes. Commas and new
+   * lines split it into separate items; "fish and chips" stays one. Nothing is
+   * interpreted, so no due days, quantities or services — but a grocery that's
+   * been bought before goes back into the aisle it was in last time.
+   */
+  async function handleQuickAdd() {
+    const list = quickAddList;
+    const texts = dictation
+      .split(/[\n,;]+/)
+      .map((t) => t.trim().replace(/[.!?]+$/, "").trim())
+      .filter(Boolean);
+    if (!list || texts.length === 0) return;
+
+    if (isRecording) {
+      shouldRecordRef.current = false;
+      recognitionRef.current?.stop();
+    }
+
+    setIsThinking(true);
+    setError(null);
+    setInfoMessage(null);
+    setReceipt(null);
+    setAnswer(null);
+    setVia(null);
+
+    try {
+      const aisles = new Map<string, string>();
+      if (list.group_by === "aisle") {
+        // Open items first, then history overwriting nothing, so the aisle
+        // on screen wins over an older one.
+        const remember = (text: string, aisle: string | null) => {
+          const key = text.trim().toLowerCase();
+          if (aisle && !aisles.has(key)) aisles.set(key, aisle);
+        };
+        for (const i of items) if (i.list_id === list.id) remember(i.text, i.aisle);
+        const { data } = await supabase
+          .from("items")
+          .select("text, aisle")
+          .eq("list_id", list.id)
+          .not("aisle", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(500);
+        for (const row of data ?? []) remember(row.text, row.aisle);
+      }
+
+      await applyAdd(
+        texts.map((text) => ({
+          text,
+          list_id: list.id,
+          qty: null,
+          aisle: aisles.get(text.toLowerCase()) ?? null,
+          service: null,
+          progress: null,
+          profile: null,
+          suggested_by: null,
+          due_on: null,
+        }))
+      );
+
       setDictation("");
       dictationRef.current = "";
     } catch (err) {
@@ -1743,13 +1821,27 @@ export default function Home() {
           </div>
         </div>
 
-        <button
-          onClick={() => handleCapture()}
-          disabled={isThinking || !dictation.trim()}
-          className="w-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-3 text-sm font-semibold text-white shadow-[0_0_25px_rgba(37,99,235,0.35)] transition hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] disabled:opacity-50 disabled:shadow-none"
-        >
-          {isThinking ? "Working it out..." : "Go"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleCapture()}
+            disabled={isThinking || !dictation.trim()}
+            className="min-w-0 flex-1 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-3 text-sm font-semibold text-white shadow-[0_0_25px_rgba(37,99,235,0.35)] transition hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] disabled:opacity-50 disabled:shadow-none"
+          >
+            {isThinking ? "Working it out..." : "Go"}
+          </button>
+          {quickAddList && (
+            <button
+              onClick={() => void handleQuickAdd()}
+              disabled={isThinking || !dictation.trim()}
+              title={`Add straight to ${quickAddList.name}, without sorting`}
+              aria-label={`Add straight to ${quickAddList.name}, without sorting`}
+              className="flex max-w-[50%] shrink-0 items-center gap-1.5 rounded-full border border-blue-500/40 bg-slate-900/70 px-4 py-3 text-sm font-semibold text-blue-200 transition hover:bg-blue-500/15 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              <span className="truncate">{quickAddList.name}</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {receipt && (
