@@ -1,0 +1,16 @@
+{
+  "id": "/tv",
+  "name": "Sorted TV",
+  "short_name": "Sorted TV",
+  "description": "Your TV lists from Sorted.",
+  "start_url": "/tv",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#05070d",
+  "theme_color": "#05070d",
+  "icons": [
+    { "src": "/tv-icon-128.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "/tv-icon-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}

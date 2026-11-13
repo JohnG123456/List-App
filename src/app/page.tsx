@@ -14,7 +14,9 @@ import {
   CalendarSearch,
   Camera,
   Eraser,
+  FileUp,
   Repeat,
+  ScanLine,
   Search,
   Settings,
   Sparkles,
@@ -47,6 +49,14 @@ import {
   watchVerdict,
 } from "@/lib/display";
 import { matchLocalCommand } from "@/lib/commands";
+import {
+  formatEpisode,
+  isAhead,
+  latestByShow,
+  matchHistory,
+  parseEpisode,
+  progressUpdate,
+} from "@/lib/progress";
 import { modelLabel } from "@/lib/models";
 import { attachFile, removeFiles, shrinkPhoto } from "@/lib/attachments";
 import PillRail from "@/components/PillRail";
@@ -64,6 +74,12 @@ const FRESH_HOLD_MS = 2600;
 const LAST_GROUP_KEY = "list-app:last-group";
 const SORT_KEY = "list-app:sort";
 const WATCHER_KEY = "list-app:watcher";
+
+// The "Sorted TV" Home Screen icon opens here, and lands on the TV pill.
+const TV_PATH = "/tv";
+function isTvApp() {
+  return typeof window !== "undefined" && window.location.pathname === TV_PATH;
+}
 
 // The TV filter: everything, shows watched together, or one person's own.
 // Anything else is a viewing profile's name.
@@ -178,6 +194,9 @@ export default function Home() {
   const [watchQuery, setWatchQuery] = useState("");
   // Remembered per phone, so Dawn's opens on Dawn's and John's on John's.
   const [watcherFilter, setWatcherFilter] = useState<string>(ALL_SHOWS);
+  const [isReadingProgress, setIsReadingProgress] = useState(false);
+  const [isImportingNetflix, setIsImportingNetflix] = useState(false);
+  const [showNetflixHelp, setShowNetflixHelp] = useState(false);
   const [picks, setPicks] = useState<
     { item_id: string; text: string; service: string | null; reason: string }[] | null
   >(null);
@@ -207,7 +226,9 @@ export default function Home() {
 
   useEffect(() => {
     activeGroupRef.current = activeGroup;
-    if (activeGroup) {
+    // The TV icon always opens on TV, so it shouldn't decide where the main
+    // icon opens either.
+    if (activeGroup && !isTvApp()) {
       try {
         window.localStorage.setItem(LAST_GROUP_KEY, activeGroup);
       } catch {
@@ -295,8 +316,12 @@ export default function Home() {
       } catch {
         remembered = null;
       }
+      const tvGroup = isTvApp()
+        ? loadedLists.find((l) => l.kind === "watch")?.group_name ?? null
+        : null;
       setActiveGroup(
-        remembered && names.includes(remembered) ? remembered : (names[0] ?? "")
+        tvGroup ??
+          (remembered && names.includes(remembered) ? remembered : (names[0] ?? ""))
       );
 
       setLoading(false);
@@ -1543,6 +1568,163 @@ export default function Home() {
     }
   }
 
+  // --------------------------------------------------------- where we're up to
+
+  /** Shows on the TV lists that are still being watched or waiting. */
+  function openShows() {
+    const ids = new Set(
+      lists.filter((l) => l.kind === "watch" && !l.is_archive).map((l) => l.id)
+    );
+    return items.filter((i) => ids.has(i.list_id) && !i.done && !i.archived_at);
+  }
+
+  /**
+   * Saves where each show is up to, through the same path as a spoken update
+   * so it gets a receipt and undo. Never winds a show back, and says what it
+   * skipped and why rather than leaving it to be noticed.
+   */
+  async function applyProgress(
+    found: { item_id: string; progress: string }[],
+    notes: string[]
+  ) {
+    const updates = [];
+    const behind: string[] = [];
+    for (const f of found) {
+      const item = items.find((i) => i.id === f.item_id);
+      if (!item) continue;
+      const was = parseEpisode(item.progress);
+      const now = parseEpisode(f.progress);
+      if (was && now && was.season === now.season && was.episode === now.episode) continue;
+      if (!isAhead(item.progress, f.progress)) {
+        behind.push(`${item.text} (${item.progress})`);
+        continue;
+      }
+      updates.push(progressUpdate(item.id, f.progress));
+    }
+
+    if (updates.length > 0) await applyUpdate(updates);
+
+    const said = [
+      updates.length === 0 && found.length > 0 ? "Everything was already up to date." : "",
+      behind.length
+        ? `Left alone, as the list is further along: ${behind.join(", ")}.`
+        : "",
+      ...notes,
+    ].filter(Boolean);
+    setInfoMessage(said.length ? said.join(" ") : null);
+  }
+
+  async function readProgressPhoto(file: File) {
+    setIsReadingProgress(true);
+    setError(null);
+    setInfoMessage(null);
+    setReceipt(null);
+    setVia(null);
+
+    try {
+      const photo = await shrinkPhoto(file);
+      const body = new FormData();
+      body.append("photo", photo);
+      const res = await fetch("/api/read-progress", { method: "POST", body });
+      const data = await res.json();
+      if (data.via) setVia(data.via);
+      if (!res.ok) throw new Error(data.error ?? "Could not read that photo");
+
+      const shows = data.shows as { item_id: string; season: number; episode: number }[];
+      const extra = data.not_on_lists as string[];
+      const notes = [
+        shows.length === 0
+          ? "Couldn't match any shows with an episode showing to your lists."
+          : "",
+        extra.length ? `Also on screen but not on your lists: ${extra.join(", ")}.` : "",
+      ];
+      await applyProgress(
+        shows.map((s) => ({ item_id: s.item_id, progress: formatEpisode(s.season, s.episode) })),
+        notes
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsReadingProgress(false);
+    }
+  }
+
+  async function importNetflix(file: File) {
+    setIsImportingNetflix(true);
+    setError(null);
+    setInfoMessage(null);
+    setReceipt(null);
+    setVia(null);
+
+    try {
+      const history = latestByShow(await file.text());
+      if (history.length === 0) throw new Error("No viewing history in that file.");
+
+      const { matched, unmatched } = matchHistory(history, openShows());
+      const found: { item_id: string; progress: string }[] = [];
+      const ask: { key: string; show: string; seasonLabel: string; episodeTitle: string }[] = [];
+
+      for (const { item, latest } of matched) {
+        if (latest.season && latest.episode) {
+          found.push({ item_id: item.id, progress: formatEpisode(latest.season, latest.episode) });
+        } else if (latest.episodeTitle) {
+          ask.push({
+            key: item.id,
+            show: latest.show,
+            seasonLabel: latest.seasonLabel,
+            episodeTitle: latest.episodeTitle,
+          });
+        }
+      }
+
+      // Only titles the file didn't number need Claude; often that's none.
+      let unplaced = 0;
+      if (ask.length > 0) {
+        const res = await fetch("/api/netflix-episodes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lines: ask }),
+        });
+        const data = await res.json();
+        if (data.via) setVia(data.via);
+        if (!res.ok) throw new Error(data.error ?? "Could not work out the episodes");
+        const episodes = data.episodes as { key: string; season: number; episode: number }[];
+        for (const e of episodes) {
+          found.push({ item_id: e.key, progress: formatEpisode(e.season, e.episode) });
+        }
+        unplaced = ask.length - episodes.length;
+      }
+
+      // On a list with a Start watching button, so not marked as started yet.
+      const waiting = matched
+        .map(({ item }) => item)
+        .filter((item) => listById(item.list_id)?.promote_to);
+      const started = waiting.map((item) => item.text);
+      const notOnLists = unmatched
+        .filter((u) => u.seasonLabel)
+        .slice(0, 8)
+        .map((u) => u.show);
+
+      await applyProgress(found, [
+        matched.length === 0 ? "None of your Netflix history matched a show on your lists." : "",
+        unplaced
+          ? `Couldn't be sure of the episode for ${unplaced} show${unplaced === 1 ? "" : "s"}, so left ${unplaced === 1 ? "it" : "them"} alone.`
+          : "",
+        started.length
+          ? `Started but still on ${listById(waiting[0].list_id)?.name ?? "the waiting list"}: ${started.join(", ")}.`
+          : "",
+        notOnLists.length
+          ? `Recently watched but not on your lists: ${notOnLists.join(", ")}.`
+          : "",
+      ]);
+      setShowNetflixHelp(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsImportingNetflix(false);
+    }
+  }
+
   // ----------------------------------------------------------- read and email
 
   function readLists(targets: List[]) {
@@ -2141,7 +2323,83 @@ export default function Home() {
                 <CalendarSearch className="h-4 w-4" />
                 {isFindingDays ? (findProgress ?? "Checking schedules...") : "Find release days"}
               </button>
+
+              <label
+                title="Photograph a Continue Watching row to update where you're up to"
+                className={`flex cursor-pointer items-center gap-2 rounded-full border border-slate-600 bg-slate-500/10 px-4 py-2 text-sm text-slate-200 ${
+                  isReadingProgress ? "pointer-events-none opacity-40" : ""
+                }`}
+              >
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  disabled={isReadingProgress}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void readProgressPhoto(file);
+                    e.target.value = "";
+                  }}
+                />
+                <ScanLine className="h-4 w-4" />
+                {isReadingProgress ? "Reading the screen..." : "Update from screen"}
+              </label>
+
+              <button
+                onClick={() => setShowNetflixHelp((open) => !open)}
+                disabled={isImportingNetflix}
+                aria-expanded={showNetflixHelp}
+                className="flex items-center gap-2 rounded-full border border-slate-600 bg-slate-500/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40"
+              >
+                <FileUp className="h-4 w-4" />
+                {isImportingNetflix ? "Reading history..." : "Netflix history"}
+              </button>
             </div>
+
+            {showNetflixHelp && (
+              <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-3 text-sm text-slate-300">
+                <p className="font-semibold text-slate-100">Update from your Netflix history</p>
+                <ol className="list-decimal space-y-1 pl-5 text-xs text-slate-400">
+                  <li>
+                    In a web browser (not the Netflix app), go to netflix.com and open{" "}
+                    <b className="text-slate-300">Account → Profiles</b>.
+                  </li>
+                  <li>
+                    Choose a profile, then <b className="text-slate-300">Viewing activity</b>.
+                  </li>
+                  <li>
+                    Scroll to the bottom and tap <b className="text-slate-300">Download all</b>.
+                  </li>
+                  <li>Come back here and choose that file. Do it once per profile.</li>
+                </ol>
+                <div className="flex gap-2">
+                  <label
+                    className={`cursor-pointer rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white ${
+                      isImportingNetflix ? "pointer-events-none opacity-40" : ""
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="sr-only"
+                      disabled={isImportingNetflix}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void importNetflix(file);
+                        e.target.value = "";
+                      }}
+                    />
+                    {isImportingNetflix ? "Reading..." : "Choose the file"}
+                  </label>
+                  <button
+                    onClick={() => setShowNetflixHelp(false)}
+                    className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-400"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
 
             {picks?.map((pick) => (
               <div

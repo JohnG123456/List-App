@@ -36,6 +36,8 @@ export async function updateAuthSession(request: NextRequest) {
   if (!user && !isAuthRoute) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
+    // So signing in from the Sorted TV icon lands back on TV.
+    if (request.nextUrl.pathname === "/tv") redirectUrl.search = "?next=/tv";
     return NextResponse.redirect(redirectUrl);
   }
 

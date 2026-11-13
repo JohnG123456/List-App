@@ -13,6 +13,15 @@ const inputClass =
 const primaryButtonClass =
   "w-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-[0_0_25px_rgba(37,99,235,0.35)] transition hover:shadow-[0_0_30px_rgba(37,99,235,0.5)] disabled:opacity-50 disabled:shadow-none";
 
+/**
+ * Where to go once signed in. Only ever the TV page or home: an open
+ * redirect taken from the address bar would be an easy phishing hop.
+ */
+function afterLogin() {
+  const next = new URLSearchParams(window.location.search).get("next");
+  return next === "/tv" ? "/tv" : "/";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("code");
@@ -78,7 +87,7 @@ export default function LoginPage() {
     if (error) {
       setError(error.message);
     } else {
-      router.push("/");
+      router.push(afterLogin());
       router.refresh();
     }
   }
@@ -131,7 +140,7 @@ export default function LoginPage() {
     } else if (isSignUp) {
       setMessage("Check your email to confirm your account, then sign in.");
     } else {
-      router.push("/");
+      router.push(afterLogin());
       router.refresh();
     }
   }

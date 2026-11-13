@@ -185,6 +185,26 @@ never invents one. Recommending something new would mean knowing what is on Stan
 this month, which changes constantly; a confident suggestion for something that
 left the service six months ago is worse than no suggestion at all.
 
+### Keeping episodes up to date
+
+There's no reading where you're up to from the streaming services themselves:
+none of the Australian ones offer it, and logging in as you to scrape them
+would mean storing every streaming password on a server. Two things stand in:
+
+- **Update from screen** (`/api/read-progress`) reads a photo of a Continue
+  Watching row, on the TV or a phone screenshot, and sets each show to the
+  episode written on screen. Only what's written counts, never a progress bar.
+- **Netflix history** reads the file Netflix gives each profile under Account →
+  Profiles → Viewing activity → Download all. It's read on the phone, newest
+  line per show wins, and titles are matched to your shows exactly after
+  tidying ("The Night Agent" and "Night Agent" match; "You" never matches
+  "Young Sheldon"). Lines Netflix numbered itself ("Episode 4") cost nothing;
+  only named episodes go to `/api/netflix-episodes` for a number, and anything
+  Claude isn't sure of is left alone.
+
+Both use the photo-reading model from Settings, never wind a show back to an
+earlier episode, and show the usual receipt with undo.
+
 ## Groceries
 
 The list groups into supermarket sections and orders them by the household's
@@ -303,6 +323,11 @@ versions, the meta tag covers the rest.
 Without those, iOS treats the icon as an ordinary bookmark and hands it back to
 Safari. If someone added it before this existed, the old icon keeps the old
 behaviour — they have to delete it and add it again.
+
+**Sorted TV** is a second icon for the same app: open `/tv` in Safari and Add to
+Home Screen. It has its own name, icon and manifest (`src/app/tv/page.tsx`,
+`public/tv.webmanifest`) and always opens on the TV pill. On Android, a
+long-press on the main icon offers the same shortcut.
 
 ## The morning email
 

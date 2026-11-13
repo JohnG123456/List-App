@@ -9,6 +9,7 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: "/",
     name: "Sorted",
     short_name: "Sorted",
     description: "Say anything and have it sorted into the right list.",
@@ -19,6 +20,14 @@ export default function manifest(): MetadataRoute.Manifest {
     // white before the page paints.
     background_color: "#05070d",
     theme_color: "#05070d",
+    // Long-press the icon on Android to jump straight to TV.
+    shortcuts: [
+      {
+        name: "TV",
+        url: "/tv",
+        icons: [{ src: "/tv-icon-128.png", sizes: "128x128", type: "image/png" }],
+      },
+    ],
     icons: [
       { src: "/app-icon-128.png", sizes: "128x128", type: "image/png" },
       {
