@@ -176,7 +176,8 @@ export default function Home() {
   const [isPicking, setIsPicking] = useState(false);
   const [isFindingDays, setIsFindingDays] = useState(false);
   const [findProgress, setFindProgress] = useState<string | null>(null);
-  const [showArchive, setShowArchive] = useState(false);
+  // Which archives (Watched, Didn't like) are opened out. Each opens on its own.
+  const [openArchives, setOpenArchives] = useState<Set<string>>(new Set());
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   // Dictation is started once and runs for minutes. Without this the voice
@@ -442,7 +443,7 @@ export default function Home() {
     setActiveGroup(group);
     setWatchQuery("");
     setPicks(null);
-    setShowArchive(false);
+    setOpenArchives(new Set());
   }
 
   const searchHits = useMemo(() => {
@@ -1555,7 +1556,7 @@ export default function Home() {
   function renderList(list: List, withHeading: boolean) {
     const mine = items.filter((i) => i.list_id === list.id);
 
-    if (list.is_archive && !showArchive) {
+    if (list.is_archive && !openArchives.has(list.id)) {
       return (
         <div key={list.id} className="space-y-1.5">
           <div className="flex items-baseline gap-2 pt-2">
@@ -1563,10 +1564,12 @@ export default function Home() {
             <span className="text-xs text-slate-500">{mine.length} titles</span>
           </div>
           <button
-            onClick={() => setShowArchive(true)}
+            onClick={() => setOpenArchives((prev) => new Set(prev).add(list.id))}
             className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300"
           >
-            Show everything we have finished
+            {list.name === "Watched"
+              ? "Show everything we have finished"
+              : `Show ${list.name}`}
           </button>
         </div>
       );
@@ -1594,7 +1597,13 @@ export default function Home() {
               // Opening the archive was a one-way door: the only way back was
               // to leave the screen and come back.
               <button
-                onClick={() => setShowArchive(false)}
+                onClick={() =>
+                  setOpenArchives((prev) => {
+                    const next = new Set(prev);
+                    next.delete(list.id);
+                    return next;
+                  })
+                }
                 className="ml-auto text-xs text-slate-400 underline"
               >
                 Hide

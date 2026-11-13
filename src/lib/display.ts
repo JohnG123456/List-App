@@ -247,6 +247,14 @@ export function watchVerdict(query: string, items: Item[], lists: List[]) {
     .filter(Boolean)
     .join(", ");
 
+  // Any archive other than Watched (e.g. Didn't like) was tried, not finished.
+  if (list.is_archive && list.name !== "Watched") {
+    return {
+      found: true,
+      text: `Yes, you tried ${match.text}${where ? ` on ${where}` : ""}. It's on ${list.name}.`,
+    };
+  }
+
   if (list.is_archive) {
     return {
       found: true,

@@ -21,6 +21,7 @@ Supabase so it's the same on every device.
    - `0010_release_days_settings.sql` — which Claude model Find release days uses, and when each show was last looked up.
    - `0011_security_hardening.sql` — the sign-up allow-list as a Supabase Auth hook (switch it on in step 7), and stops members changing anything on their own membership row except their initials.
    - `0012_item_attachments.sql` — photos and documents on items: a private `attachments` Storage bucket (10 MB a file, photos/PDF/Office/text only) and who can read, add and remove them.
+   - `0013_didnt_like.sql` — a "Didn't like" list on the TV pill, for shows you tried and gave up on. An archive like Watched, so it stays folded away and out of Pick something.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**:
