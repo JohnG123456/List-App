@@ -71,8 +71,18 @@ const ROUTE_TOOL: Anthropic.Tool = {
                 "from the household's viewing profiles. Empty means watched " +
                 "together, which is the default.",
             },
+            recommended: {
+              type: "boolean",
+              description: "True only when they say they'd recommend the show.",
+            },
+            recommend_note: {
+              type: "string",
+              description:
+                "Their reason for recommending it, in a short line in their own " +
+                "words. Empty if they gave none.",
+            },
           },
-          required: ["text", "list_id", "qty", "aisle", "service", "progress", "profile", "suggested_by", "due_on", "airs_on", "watcher"],
+          required: ["text", "list_id", "qty", "aisle", "service", "progress", "profile", "suggested_by", "due_on", "airs_on", "watcher", "recommended", "recommend_note"],
         },
       },
       updates: {
@@ -108,13 +118,26 @@ const ROUTE_TOOL: Anthropic.Tool = {
                 "profiles, or empty to leave alone. Use \"together\" when it " +
                 "goes back to being watched together.",
             },
+            recommended: {
+              type: "string",
+              enum: ["yes", "no", "unchanged"],
+              description:
+                "yes when they say they'd recommend the show, no when they stop " +
+                "recommending it, unchanged otherwise.",
+            },
+            recommend_note: {
+              type: "string",
+              description:
+                "Their reason for recommending it, in a short line in their own " +
+                "words, or empty to leave alone.",
+            },
             done: {
               type: "string",
               enum: ["done", "not_done", "unchanged"],
               description: "Whether this ticks the item off.",
             },
           },
-          required: ["item_id", "text", "qty", "service", "progress", "profile", "due_on", "airs_on", "watcher", "done"],
+          required: ["item_id", "text", "qty", "service", "progress", "profile", "due_on", "airs_on", "watcher", "recommended", "recommend_note", "done"],
         },
       },
       answer: {
@@ -272,6 +295,7 @@ export async function POST(request: Request) {
         `${i.latest_episode ? ` | latest episode out ${i.latest_episode}` : ""}` +
         `${i.all_released ? " | whole season out" : ""}` +
         `${i.watcher ? ` | only ${i.watcher} watches it` : ""}` +
+        `${i.recommended ? " | recommended" : ""}` +
         `${i.done ? " | finished" : ""}`
     ),
     "",
@@ -287,6 +311,10 @@ export async function POST(request: Request) {
     "one person watches something, or someone watches it on their own (\"Dawn's",
     "watching The Crown by herself\"), set watcher to that person. Leave it",
     "empty otherwise.",
+    "Saying they'd recommend a show (\"we'd recommend Severance, slow start but",
+    "worth it\") tags it: an update with recommended yes and their reason as",
+    "the note, or recommended true when adding it. Never recommend a show on",
+    "its own initiative.",
     "",
     "Ticking a single item off, switching list, and reading a list aloud are",
     "handled before this point, so anything arriving here needed more than a",
@@ -420,6 +448,10 @@ export async function POST(request: Request) {
           : matchProfile(u.watcher)
             ? { watcher: matchProfile(u.watcher) }
             : {}),
+        // Likewise for migration 0015.
+        ...(u.recommended === "yes" ? { recommended: true } : {}),
+        ...(u.recommended === "no" ? { recommended: false } : {}),
+        ...(orNull(u.recommend_note) ? { recommend_note: orNull(u.recommend_note) } : {}),
         done: u.done === "done" ? true : u.done === "not_done" ? false : null,
       }));
 
@@ -450,6 +482,9 @@ export async function POST(request: Request) {
       due_on: orNull(i.due_on),
       ...(orNull(i.airs_on) ? { airs_on: orNull(i.airs_on) } : {}),
       ...(matchProfile(i.watcher) ? { watcher: matchProfile(i.watcher) } : {}),
+      ...((i.recommended as unknown) === true
+        ? { recommended: true, recommend_note: orNull(i.recommend_note) }
+        : {}),
     }));
 
   if (newItems.length === 0) {

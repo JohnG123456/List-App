@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Attachment, Household, Item, List } from "@/lib/types";
-import { WEEKDAYS, addDays, localDateKey } from "@/lib/display";
+import { WEEKDAYS, addDays, canRecommend, localDateKey } from "@/lib/display";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 
 type Props = {
@@ -41,6 +41,8 @@ export default function EditSheet({
   const [progress, setProgress] = useState(item.progress ?? "");
   const [profile, setProfile] = useState(item.profile ?? "");
   const [watcher, setWatcher] = useState(item.watcher ?? "");
+  const [recommended, setRecommended] = useState(item.recommended ?? false);
+  const [recommendNote, setRecommendNote] = useState(item.recommend_note ?? "");
   const [qty, setQty] = useState(item.qty ?? "");
   const [aisle, setAisle] = useState(item.aisle ?? "");
   const [dueOn, setDueOn] = useState(item.due_on ?? "");
@@ -76,6 +78,11 @@ export default function EditSheet({
       if (allReleased !== (item.all_released ?? false)) patch.all_released = allReleased;
       // And migration 0014's.
       if (orNull(watcher) !== (item.watcher ?? null)) patch.watcher = orNull(watcher);
+      // And migration 0015's.
+      if (recommended !== (item.recommended ?? false)) patch.recommended = recommended;
+      if (orNull(recommendNote) !== (item.recommend_note ?? null)) {
+        patch.recommend_note = orNull(recommendNote);
+      }
     } else if (isShop) {
       patch.qty = orNull(qty);
       patch.aisle = orNull(aisle);
@@ -191,6 +198,30 @@ export default function EditSheet({
                 Whole season is out
               </label>
             </div>
+
+            {canRecommend(list) && (
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={recommended}
+                  onChange={(e) => setRecommended(e.target.checked)}
+                  className="h-4 w-4 accent-amber-400"
+                />
+                We&apos;d recommend this
+              </label>
+              {recommended && (
+                <input
+                  id="edit-recommend-note"
+                  value={recommendNote}
+                  onChange={(e) => setRecommendNote(e.target.value)}
+                  placeholder="Why, in a line (optional)"
+                  maxLength={140}
+                  className={field}
+                />
+              )}
+            </div>
+            )}
 
             <div className="space-y-1">
               <label className={label} htmlFor="edit-watcher">

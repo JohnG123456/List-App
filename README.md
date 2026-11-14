@@ -23,6 +23,7 @@ Supabase so it's the same on every device.
    - `0012_item_attachments.sql` — photos and documents on items: a private `attachments` Storage bucket (10 MB a file, photos/PDF/Office/text only) and who can read, add and remove them.
    - `0013_didnt_like.sql` — a "Didn't like" list on the TV pill, for shows you tried and gave up on. An archive like Watched, so it stays folded away and out of Pick something.
    - `0014_watcher.sql` — who watches a show when it isn't watched together (e.g. only Dawn), for the Together / per-person filter on the TV pill.
+   - `0015_recommended.sql` — the ★ Recommend tag on shows and the one-line note on why, for sharing a recommended list with friends.
 3. In **Authentication → Providers**, email/password is on by default.
 4. In **Authentication → Emails → Magic Link**, edit the template so it shows the numeric code, e.g. add `<p>Your code: {{ .Token }}</p>` (the default template only shows a clickable link, which Outlook's Safe Links scanner "clicks" for you and burns before you get to it — see [How it works](#how-it-works)).
 5. In **Authentication → URL Configuration**:

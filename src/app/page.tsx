@@ -17,6 +17,8 @@ import {
   FileUp,
   Repeat,
   ScanLine,
+  Share2,
+  Star,
   Search,
   Settings,
   Sparkles,
@@ -49,6 +51,7 @@ import {
   watchVerdict,
 } from "@/lib/display";
 import { matchLocalCommand } from "@/lib/commands";
+import { shareChoices, shareText } from "@/lib/share";
 import {
   formatEpisode,
   isAhead,
@@ -80,8 +83,7 @@ const TV_PATH = "/tv";
 // How long the TV icon has to be out of view before it goes back to TV.
 const TV_RESET_AFTER_MS = 60 * 1000;
 
-// How long Email me waits for the second tap before going back to normal.
-const EMAIL_CONFIRM_MS = 4000;
+
 function isTvApp() {
   return typeof window !== "undefined" && window.location.pathname === TV_PATH;
 }
@@ -184,9 +186,18 @@ export default function Home() {
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
   const [isEmailing, setIsEmailing] = useState(false);
-  // Email me needs a second tap, so a bumped button doesn't send anything.
-  const [emailArmed, setEmailArmed] = useState(false);
-  const emailArmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Email me opens a sheet saying what goes where, and its Send button is the
+  // confirmation, so a bumped button never sends anything.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareKey, setShareKey] = useState("pill");
+  // "me", "share" for the phone's share menu, or a household member's user id.
+  const [shareTo, setShareTo] = useState("me");
+  const [householdEmails, setHouseholdEmails] = useState<
+    { user_id: string; email: string }[]
+  >([]);
+  const [onlyRecommended, setOnlyRecommended] = useState(false);
+  const [recommendingItem, setRecommendingItem] = useState<Item | null>(null);
+  const [recommendDraft, setRecommendDraft] = useState("");
 
   const [movingItem, setMovingItem] = useState<Item | null>(null);
   const [duingItem, setDuingItem] = useState<Item | null>(null);
@@ -487,6 +498,7 @@ export default function Home() {
 
   /** Whether a show belongs under the TV filter that's selected. */
   function passesWatcher(item: Item) {
+    if (onlyRecommended && !item.recommended) return false;
     if (watcherFilter === ALL_SHOWS) return true;
     if (watcherFilter === TOGETHER) return !item.watcher;
     return item.watcher === watcherFilter;
@@ -535,8 +547,6 @@ export default function Home() {
   /** Switching pills resets the state that only makes sense on one screen. */
   function selectGroup(group: string) {
     setActiveGroup(group);
-    // An armed Email me was for the list you were on, not this one.
-    setEmailArmed(false);
     setWatchQuery("");
     setPicks(null);
     setOpenArchives(new Set());
@@ -886,6 +896,8 @@ export default function Home() {
       }
       if (update.due_on !== undefined) patch.due_on = update.due_on;
       if (update.watcher !== undefined) patch.watcher = update.watcher;
+      if (update.recommended !== undefined) patch.recommended = update.recommended;
+      if (update.recommend_note !== undefined) patch.recommend_note = update.recommend_note;
       if (update.done !== null) {
         patch.done = update.done;
         patch.done_at = update.done ? new Date().toISOString() : null;
@@ -939,6 +951,13 @@ export default function Home() {
                 : {}),
               // And migration 0014's.
               ...(original.watcher !== undefined ? { watcher: original.watcher } : {}),
+              // And migration 0015's.
+              ...(original.recommended !== undefined
+                ? {
+                    recommended: original.recommended,
+                    recommend_note: original.recommend_note ?? null,
+                  }
+                : {}),
               // Undoing a lookup makes the show due for another one.
               ...(original.release_checked_at !== undefined
                 ? { release_checked_at: original.release_checked_at }
@@ -1787,16 +1806,83 @@ export default function Home() {
     speak(parts.length === 0 ? "Nothing open on that list." : parts.join(" "));
   }
 
-  /** First tap arms the button; a second tap within a few seconds sends. */
-  function tapEmailMe() {
-    if (emailArmTimer.current) clearTimeout(emailArmTimer.current);
-    if (emailArmed) {
-      setEmailArmed(false);
-      void emailLists(visibleLists);
+  const shareOptions = useMemo(
+    () => shareChoices({ lists, items, activeGroup, watchers: watcherOptions }),
+    [lists, items, activeGroup, watcherOptions]
+  );
+  const shareChoice = shareOptions.find((c) => c.key === shareKey) ?? shareOptions[0];
+
+  async function openShare() {
+    setShareKey("pill");
+    setShareTo("me");
+    setShareOpen(true);
+    // Who else can be emailed. Row-level security keeps it to this household.
+    const { data } = await supabase.rpc("household_member_emails");
+    setHouseholdEmails(
+      ((data ?? []) as { user_id: string; email: string }[]).filter(
+        (m) => m.user_id !== userId && m.email
+      )
+    );
+  }
+
+  /** Sends what's chosen in the Share sheet, by email or the share menu. */
+  async function sendShare() {
+    const choice = shareChoice;
+    if (!choice || choice.items.length === 0) return;
+
+    if (shareTo === "share") {
+      const text = shareText(choice);
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: choice.title, text });
+        } else {
+          await navigator.clipboard.writeText(text);
+          setInfoMessage("Copied. Paste it into a message.");
+        }
+        setShareOpen(false);
+      } catch (err) {
+        // Closing the share menu without picking anything isn't an error.
+        if (err instanceof Error && err.name === "AbortError") return;
+        setError("Couldn't open the share menu.");
+      }
       return;
     }
-    setEmailArmed(true);
-    emailArmTimer.current = setTimeout(() => setEmailArmed(false), EMAIL_CONFIRM_MS);
+
+    setIsEmailing(true);
+    setError(null);
+    setInfoMessage(null);
+    try {
+      const res = await fetch("/api/email-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemIds: choice.items.map((i) => i.id),
+          title: choice.title,
+          recommended: choice.recommended,
+          to: shareTo === "me" ? null : shareTo,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to send email");
+      const who = householdEmails.find((m) => m.user_id === shareTo);
+      setInfoMessage(who ? `Sent to ${who.email}.` : "Sent to your inbox.");
+      setShareOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsEmailing(false);
+    }
+  }
+
+  /** The ★ on a show. Turning it on asks why, which is optional. */
+  async function toggleRecommend(item: Item) {
+    if (item.recommended) {
+      await editItem(item, { recommended: false });
+      return;
+    }
+    await editItem(item, { recommended: true });
+    setRecommendDraft(item.recommend_note ?? "");
+    setRecommendingItem({ ...item, recommended: true });
   }
 
   async function emailLists(allTargets: List[]) {
@@ -1833,7 +1919,8 @@ export default function Home() {
       (i) => i.list_id === list.id && (list.kind !== "watch" || passesWatcher(i))
     );
 
-    if (list.is_archive && !openArchives.has(list.id)) {
+    // Most recommendations live on Watched, so the ★ filter opens archives.
+    if (list.is_archive && !openArchives.has(list.id) && !onlyRecommended) {
       return (
         <div key={list.id} className="space-y-1.5">
           <div className="flex items-baseline gap-2 pt-2">
@@ -1921,6 +2008,7 @@ export default function Home() {
                   onBumpEpisode={bumpItemEpisode}
                   onRequestDue={setDuingItem}
                   onSnooze={snoozeItem}
+                  onToggleRecommend={toggleRecommend}
                 />
               ))}
             </div>
@@ -2014,6 +2102,7 @@ export default function Home() {
                 onBumpEpisode={bumpItemEpisode}
                 onRequestDue={setDuingItem}
                 onSnooze={snoozeItem}
+                  onToggleRecommend={toggleRecommend}
               />
             ))}
           </div>
@@ -2221,17 +2310,13 @@ export default function Home() {
             {isReading ? "Stop reading" : "Read aloud"}
           </button>
           <button
-            onClick={tapEmailMe}
+            onClick={() => (shareOpen ? setShareOpen(false) : void openShare())}
             disabled={isEmailing}
-            aria-live="polite"
-            className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm backdrop-blur disabled:opacity-40 ${
-              emailArmed
-                ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
-                : "border-slate-700 bg-slate-900/60 text-slate-200"
-            }`}
+            aria-expanded={shareOpen}
+            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 backdrop-blur disabled:opacity-40"
           >
             <Mail className="h-4 w-4" />
-            {isEmailing ? "Sending..." : emailArmed ? "Tap again to send" : "Email me"}
+            {isEmailing ? "Sending..." : "Email / share"}
           </button>
           <button
             onClick={() => {
@@ -2243,6 +2328,92 @@ export default function Home() {
             Choose lists
           </button>
         </div>
+
+        {shareOpen && shareChoice && (
+          <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-900/70 p-3">
+            <div className="space-y-1.5">
+              <p className="text-xs uppercase tracking-wider text-slate-500">What</p>
+              <div className="flex flex-wrap gap-1.5">
+                {shareOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    onClick={() => setShareKey(option.key)}
+                    aria-pressed={shareChoice.key === option.key}
+                    className={`rounded-full border px-3 py-1 text-xs ${
+                      shareChoice.key === option.key
+                        ? "border-blue-500/60 bg-blue-500/15 text-blue-100"
+                        : "border-slate-700 text-slate-300"
+                    }`}
+                  >
+                    {option.label} · {option.items.length}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-xs uppercase tracking-wider text-slate-500">To</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: "me", label: "Email me" },
+                  ...householdEmails.map((m) => {
+                    const initials = members.find((x) => x.user_id === m.user_id)?.initials;
+                    return {
+                      value: m.user_id,
+                      label: `Email ${initials ? initials.toUpperCase() : m.email.split("@")[0]}`,
+                    };
+                  }),
+                  { value: "share", label: "Share with a friend…" },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    onClick={() => setShareTo(option.value)}
+                    aria-pressed={shareTo === option.value}
+                    className={`rounded-full border px-3 py-1 text-xs ${
+                      shareTo === option.value
+                        ? "border-blue-500/60 bg-blue-500/15 text-blue-100"
+                        : "border-slate-700 text-slate-300"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              {shareChoice.items.length === 0
+                ? "Nothing in this one yet."
+                : `${shareChoice.items.length} ${shareChoice.items.length === 1 ? "item" : "items"}: ${shareChoice.items
+                    .slice(0, 4)
+                    .map((i) => i.text)
+                    .join(", ")}${shareChoice.items.length > 4 ? ", …" : ""}`}
+              {shareTo === "share" && shareChoice.items.length > 0 && (
+                <span className="block pt-1 text-slate-500">
+                  Friends see titles, services{shareChoice.recommended ? " and your notes" : ""}. Not
+                  progress, profiles or who added what.
+                </span>
+              )}
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => void sendShare()}
+                disabled={isEmailing || shareChoice.items.length === 0}
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+              >
+                {shareTo === "share" ? <Share2 className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
+                {isEmailing ? "Sending..." : shareTo === "share" ? "Share" : "Send email"}
+              </button>
+              <button
+                onClick={() => setShareOpen(false)}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-400"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {pickerFor && (
           <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-900/70 p-3">
@@ -2309,8 +2480,23 @@ export default function Home() {
 
         {isWatchGroup && (
           <div className="space-y-2">
-            {(watcherOptions.length > 0 || watcherFilter !== ALL_SHOWS) && (
+            {(watcherOptions.length > 0 ||
+              watcherFilter !== ALL_SHOWS ||
+              onlyRecommended ||
+              items.some((i) => i.recommended)) && (
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Whose shows">
+                <button
+                  onClick={() => setOnlyRecommended((on) => !on)}
+                  aria-pressed={onlyRecommended}
+                  className={`flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition ${
+                    onlyRecommended
+                      ? "border-amber-400/70 bg-amber-500/20 text-amber-100"
+                      : "border-slate-700 bg-slate-900/60 text-slate-300 hover:text-slate-100"
+                  }`}
+                >
+                  <Star className={`h-3 w-3 ${onlyRecommended ? "fill-amber-300" : ""}`} />
+                  Recommended
+                </button>
                 {[
                   { value: ALL_SHOWS, label: "All" },
                   { value: TOGETHER, label: "Together" },
@@ -2563,6 +2749,55 @@ export default function Home() {
           }}
           onCancel={() => setEditingItem(null)}
         />
+      )}
+
+      {recommendingItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3"
+          onClick={() => setRecommendingItem(null)}
+        >
+          <form
+            role="dialog"
+            aria-label="Why do you recommend it"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const note = recommendDraft.trim() || null;
+              if (note !== (recommendingItem.recommend_note ?? null)) {
+                void editItem(recommendingItem, { recommend_note: note });
+              }
+              setRecommendingItem(null);
+            }}
+            className="w-full max-w-md space-y-2 rounded-2xl border border-slate-700 bg-slate-900 p-3 shadow-2xl"
+          >
+            <p className="px-1 text-xs uppercase tracking-wider text-slate-500">
+              ★ Why do you recommend &ldquo;{recommendingItem.text}&rdquo;?
+            </p>
+            <input
+              autoFocus
+              value={recommendDraft}
+              onChange={(e) => setRecommendDraft(e.target.value)}
+              placeholder="e.g. slow start, worth it by ep 3"
+              maxLength={140}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-400"
+            />
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-medium text-amber-950"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setRecommendingItem(null)}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-400"
+              >
+                Skip
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {duingItem && (

@@ -10,11 +10,18 @@ import {
   Pencil,
   Play,
   SkipForward,
+  Star,
   Trash2,
   UserRound,
 } from "lucide-react";
 import type { Item, List } from "@/lib/types";
-import { dueBucket, formatTimestamp, possessive, todayWeekday } from "@/lib/display";
+import {
+  canRecommend,
+  dueBucket,
+  formatTimestamp,
+  possessive,
+  todayWeekday,
+} from "@/lib/display";
 
 /** "Today", "Tomorrow", or a short date — never a full timestamp. */
 function formatDue(due: string) {
@@ -46,6 +53,8 @@ type Props = {
   onBumpEpisode: (item: Item) => void;
   onRequestDue: (item: Item) => void;
   onSnooze: (item: Item) => void;
+  /** Absent where recommending makes no sense, e.g. search results. */
+  onToggleRecommend?: (item: Item) => void;
 };
 
 /**
@@ -71,6 +80,7 @@ export default function ItemRow({
   onBumpEpisode,
   onRequestDue,
   onSnooze,
+  onToggleRecommend,
 }: Props) {
   const isShared = list.private_to === null;
   const isWatch = list.kind === "watch";
@@ -118,6 +128,11 @@ export default function ItemRow({
             >
               {item.text}
             </p>
+            {isWatch && item.recommended && item.recommend_note && (
+              <p className="mt-0.5 text-xs italic leading-snug text-amber-200/80">
+                “{item.recommend_note}”
+              </p>
+            )}
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs leading-snug text-slate-500">
               {item.qty && (
                 <span className="rounded border border-slate-700 bg-slate-500/10 px-1.5 text-[10px]">
@@ -238,6 +253,19 @@ export default function ItemRow({
             </div>
           </div>
 
+          {onToggleRecommend && canRecommend(list) && (
+            <button
+              onClick={() => onToggleRecommend(item)}
+              aria-pressed={Boolean(item.recommended)}
+              aria-label={item.recommended ? "Stop recommending" : "Recommend this"}
+              title={item.recommended ? "Stop recommending" : "Recommend this"}
+              className={`shrink-0 ${
+                item.recommended ? "text-amber-300" : "text-slate-500 hover:text-amber-300"
+              }`}
+            >
+              <Star className={`h-4 w-4 ${item.recommended ? "fill-amber-300" : ""}`} />
+            </button>
+          )}
           {list.promote_to && !item.done && (
             <button
               onClick={() => onPromote(item)}

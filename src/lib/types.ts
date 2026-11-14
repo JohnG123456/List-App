@@ -51,6 +51,10 @@ export type Item = {
   release_checked_at?: string | null;
   /** The one person who watches it, from the viewing profiles. Null: together. */
   watcher?: string | null;
+  /** Tagged as one you'd recommend to friends. */
+  recommended?: boolean;
+  /** Why, in a line: "slow start, worth it by ep 3". */
+  recommend_note?: string | null;
 };
 
 /** A photo or document on an item. The file itself is in Storage at `path`. */
@@ -109,6 +113,8 @@ export type NewItem = {
   due_on: string | null;
   airs_on?: string | null;
   watcher?: string | null;
+  recommended?: boolean;
+  recommend_note?: string | null;
 };
 
 export type ItemUpdate = {
@@ -125,6 +131,9 @@ export type ItemUpdate = {
   release_checked_at?: string | null;
   /** Undefined leaves it alone; null makes it a together show again. */
   watcher?: string | null;
+  /** Undefined leaves these alone. */
+  recommended?: boolean;
+  recommend_note?: string | null;
   done: boolean | null;
 };
 

@@ -65,6 +65,15 @@ export function openItems(items: Item[], listId: string) {
   );
 }
 
+/**
+ * Whether shows on this list can be recommended. Any TV list but an archive
+ * other than Watched, which is Didn't like: nobody recommends what they
+ * gave up on.
+ */
+export function canRecommend(list: List) {
+  return list.kind === "watch" && !(list.is_archive && list.name !== "Watched");
+}
+
 export function listsInGroup(lists: List[], groupName: string) {
   return lists
     .filter((l) => l.group_name === groupName)
