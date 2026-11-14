@@ -79,6 +79,9 @@ const WATCHER_KEY = "list-app:watcher";
 const TV_PATH = "/tv";
 // How long the TV icon has to be out of view before it goes back to TV.
 const TV_RESET_AFTER_MS = 60 * 1000;
+
+// How long Email me waits for the second tap before going back to normal.
+const EMAIL_CONFIRM_MS = 4000;
 function isTvApp() {
   return typeof window !== "undefined" && window.location.pathname === TV_PATH;
 }
@@ -181,6 +184,9 @@ export default function Home() {
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [isReading, setIsReading] = useState(false);
   const [isEmailing, setIsEmailing] = useState(false);
+  // Email me needs a second tap, so a bumped button doesn't send anything.
+  const [emailArmed, setEmailArmed] = useState(false);
+  const emailArmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [movingItem, setMovingItem] = useState<Item | null>(null);
   const [duingItem, setDuingItem] = useState<Item | null>(null);
@@ -529,6 +535,8 @@ export default function Home() {
   /** Switching pills resets the state that only makes sense on one screen. */
   function selectGroup(group: string) {
     setActiveGroup(group);
+    // An armed Email me was for the list you were on, not this one.
+    setEmailArmed(false);
     setWatchQuery("");
     setPicks(null);
     setOpenArchives(new Set());
@@ -1779,6 +1787,18 @@ export default function Home() {
     speak(parts.length === 0 ? "Nothing open on that list." : parts.join(" "));
   }
 
+  /** First tap arms the button; a second tap within a few seconds sends. */
+  function tapEmailMe() {
+    if (emailArmTimer.current) clearTimeout(emailArmTimer.current);
+    if (emailArmed) {
+      setEmailArmed(false);
+      void emailLists(visibleLists);
+      return;
+    }
+    setEmailArmed(true);
+    emailArmTimer.current = setTimeout(() => setEmailArmed(false), EMAIL_CONFIRM_MS);
+  }
+
   async function emailLists(allTargets: List[]) {
     const targets = allTargets.filter((l) => !l.is_archive);
     if (targets.length === 0) {
@@ -2201,12 +2221,17 @@ export default function Home() {
             {isReading ? "Stop reading" : "Read aloud"}
           </button>
           <button
-            onClick={() => void emailLists(visibleLists)}
+            onClick={tapEmailMe}
             disabled={isEmailing}
-            className="flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200 backdrop-blur disabled:opacity-40"
+            aria-live="polite"
+            className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm backdrop-blur disabled:opacity-40 ${
+              emailArmed
+                ? "border-amber-500/60 bg-amber-500/15 text-amber-100"
+                : "border-slate-700 bg-slate-900/60 text-slate-200"
+            }`}
           >
             <Mail className="h-4 w-4" />
-            {isEmailing ? "Sending..." : "Email me"}
+            {isEmailing ? "Sending..." : emailArmed ? "Tap again to send" : "Email me"}
           </button>
           <button
             onClick={() => {
