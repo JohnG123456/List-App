@@ -77,6 +77,8 @@ const WATCHER_KEY = "list-app:watcher";
 
 // The "Sorted TV" Home Screen icon opens here, and lands on the TV pill.
 const TV_PATH = "/tv";
+// How long the TV icon has to be out of view before it goes back to TV.
+const TV_RESET_AFTER_MS = 60 * 1000;
 function isTvApp() {
   return typeof window !== "undefined" && window.location.pathname === TV_PATH;
 }
@@ -402,6 +404,29 @@ export default function Home() {
   }, [activeGroup, freshListIds, lists, items]);
 
   const groups = useMemo(() => groupNames(lists), [lists]);
+
+  // iOS often resumes a Home Screen app rather than restarting it, so the TV
+  // icon could reopen on whichever pill was left showing. Coming back to it
+  // after a while puts it back on TV. A short trip away (the camera, a photo
+  // picker, a quick look at another app) leaves it where it was, so a photo
+  // taken from Groceries doesn't land you somewhere else.
+  useEffect(() => {
+    if (!isTvApp()) return;
+    const tvGroup = lists.find((l) => l.kind === "watch")?.group_name;
+    if (!tvGroup) return;
+
+    let hiddenAt: number | null = null;
+    function onVisibility() {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (hiddenAt !== null && Date.now() - hiddenAt > TV_RESET_AFTER_MS) {
+        setActiveGroup(tvGroup!);
+        hiddenAt = null;
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [lists]);
   const attachmentCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const a of attachments) counts.set(a.item_id, (counts.get(a.item_id) ?? 0) + 1);
